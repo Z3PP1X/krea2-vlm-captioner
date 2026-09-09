@@ -21,7 +21,7 @@ export TOKENIZERS_PARALLELISM=false
 echo "========================================================================"
 echo " Starting Kink Collection End-to-End Pipeline (Stages 1-5)"
 echo " GPU Target : RTX PRO 6000 (96GB VRAM)"
-echo " Model      : Gemma 4 12B Multimodal (google/gemma-4-12B-it)"
+echo " Model      : Qwen 2.5 VL 7B Instruct (Qwen/Qwen2.5-VL-7B-Instruct)"
 echo " Batch Size : 32"
 echo " Workers    : 16"
 echo " Min Res    : 256px"
