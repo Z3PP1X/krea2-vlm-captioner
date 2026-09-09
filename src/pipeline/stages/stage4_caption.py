@@ -211,10 +211,12 @@ def run_stage4(args: Any, config: Dict[str, Any]) -> int:
     m_lower = model_name.lower()
     if "gemma-4" in m_lower or "gemma4" in m_lower:
         from pipeline.captioning.hf_gemma4_engine import Gemma4HfEngine
+        parallel_sub_batch = getattr(args, "parallel_sub_batch", None) or min(batch_size, 16)
         engine = Gemma4HfEngine(
             model_name=model_name,
             temperature=float(cap_cfg.get("temperature", 0.2)),
             max_tokens=int(cap_cfg.get("max_tokens", 350)),
+            parallel_sub_batch_size=int(parallel_sub_batch),
         )
     else:
         engine = QwenVLEngine(

@@ -320,7 +320,8 @@ def main():
     parser.add_argument("--max-per-scene", type=int, default=7, help="Max images per scene (default: 7)")
     parser.add_argument("--min-res", type=int, default=256, help="Minimum edge resolution (default: 256)")
     parser.add_argument("--workers", type=int, default=16, help="Parallel CPU workers (default: 16)")
-    parser.add_argument("--batch-size", type=int, default=32, help="GPU batch size (default: 32)")
+    parser.add_argument("--batch-size", type=int, default=32, help="Pipeline batch size (default: 32)")
+    parser.add_argument("--parallel-sub-batch", type=int, default=8, help="Parallel GPU tensor batch size for Gemma 4 (default: 8, up to 16-24 for 96GB VRAM)")
     parser.add_argument("--model", type=str, default="google/gemma-4-12B-it", help="Model name (default: google/gemma-4-12B-it)")
     parser.add_argument("--dataset-name", type=str, default="kink_collection", help="Unified dataset name in AI-Toolkit (default: kink_collection)")
     parser.add_argument("--skip-crawl", action="store_true", help="Skip Stage 1 crawl and jump to processing")
@@ -422,6 +423,7 @@ def main():
         args_caption = argparse.Namespace(
             model=args.model,
             batch_size=args.batch_size,
+            parallel_sub_batch=args.parallel_sub_batch,
             trigger=None,          # Uses per-item trigger_word: 'kink, <category>'!
             mode="style",
             max_model_len=8192,
