@@ -5,7 +5,10 @@ import logging
 from typing import List, Optional, Tuple
 from urllib.parse import urljoin, urlparse, parse_qs, urlencode
 import requests
-from bs4 import BeautifulSoup
+try:
+    from bs4 import BeautifulSoup
+except ImportError:
+    BeautifulSoup = None
 
 from pipeline.crawler.models import CandidateImage
 

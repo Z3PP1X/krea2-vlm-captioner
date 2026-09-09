@@ -28,7 +28,6 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
 from PIL import Image
-from bs4 import BeautifulSoup
 
 # Ensure project root is in sys.path
 SCRIPT_DIR = Path(__file__).resolve().parent
