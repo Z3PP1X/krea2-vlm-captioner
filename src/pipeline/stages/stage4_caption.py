@@ -114,18 +114,39 @@ def run_stage4(args: Any, config: Dict[str, Any]) -> int:
     logger.info(f"Sample Mode           : {sample_size if sample_size else 'Full Dataset'}")
     logger.info("=" * 60)
 
-    # 1. Gather eligible items (including self-healing recovery for transient vllm_error)
-    eligible = [
-        e for e in manifest
-        if e.stages_status.get("stage3_downscale") == "done"
-        and (
-            e.stages_status.get("stage4_caption") in ["pending", None]
-            or (
-                e.stages_status.get("stage4_caption") == "failed"
-                and any("vllm_error" in r for r in e.rejection_reasons)
+    force = bool(getattr(args, "force", False))
+    retry_failed = bool(getattr(args, "retry_failed", True))
+
+    # 1. Gather eligible items
+    # Check if stage 3 downscaling was run
+    downscale_done_count = sum(1 for e in manifest if e.stages_status.get("stage3_downscale") == "done")
+
+    if downscale_done_count > 0:
+        eligible = [
+            e for e in manifest
+            if e.stages_status.get("stage3_downscale") == "done"
+            and (
+                force
+                or e.stages_status.get("stage4_caption") in ["pending", None]
+                or (retry_failed and e.stages_status.get("stage4_caption") == "failed")
             )
-        )
-    ]
+        ]
+    else:
+        # Fallback: if Stage 3 downscaling was not run yet, accept QC-passed images directly
+        qc_passed_entries = [
+            e for e in manifest
+            if e.stages_status.get("stage2_qc") == "passed"
+            and (
+                force
+                or e.stages_status.get("stage4_caption") in ["pending", None]
+                or (retry_failed and e.stages_status.get("stage4_caption") == "failed")
+            )
+        ]
+        if qc_passed_entries:
+            logger.info("Notice: Stage 3 Downscale has not been run yet. Proceeding with raw QC-passed images.")
+            eligible = qc_passed_entries
+        else:
+            eligible = []
 
     if sample_size and sample_size < len(eligible):
         logger.info(f"Selecting random sample of {sample_size} from {len(eligible)} eligible images.")
@@ -133,7 +154,24 @@ def run_stage4(args: Any, config: Dict[str, Any]) -> int:
 
     logger.info(f"Total images to caption: {len(eligible)}")
     if not eligible:
-        logger.info("No images pending captioning.")
+        total_m = len(manifest)
+        qc_passed = sum(1 for e in manifest if e.stages_status.get("stage2_qc") == "passed")
+        downscale_done = sum(1 for e in manifest if e.stages_status.get("stage3_downscale") == "done")
+        captioned = sum(1 for e in manifest if e.stages_status.get("stage4_caption") == "captioned")
+        screened_out = sum(1 for e in manifest if e.stages_status.get("stage4_caption") == "rejected_screening")
+        failed_caption = sum(1 for e in manifest if e.stages_status.get("stage4_caption") == "failed")
+
+        logger.info("No images pending captioning. Manifest status diagnostics:")
+        logger.info(f"  - Total entries in manifest    : {total_m}")
+        logger.info(f"  - Stage 2 QC Passed            : {qc_passed}")
+        logger.info(f"  - Stage 3 Downscaled           : {downscale_done}")
+        logger.info(f"  - Stage 4 Already Captioned    : {captioned}")
+        logger.info(f"  - Stage 4 Rejected Screening   : {screened_out}")
+        logger.info(f"  - Stage 4 Failed Previous Runs : {failed_caption}")
+        if captioned > 0:
+            logger.info("Tip: All eligible images are already captioned. Use 'pipeline caption --force' to re-caption.")
+        elif qc_passed == 0:
+            logger.info("Tip: No images have passed Stage 2 QC yet. Run 'pipeline qc' first.")
         return 0
 
     # 2. Initialize VLM Engine
