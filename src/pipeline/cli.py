@@ -149,6 +149,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     # Stage 5: Export
     export_parser = subparsers.add_parser("export", help="Stufe 5: Export dataset for AI-Toolkit with balanced repeats")
+    export_parser.add_argument("--ai-toolkit-dir", type=str, default=None, help="Path to AI-Toolkit installation (e.g. /app/ai-toolkit) for automatic symlink and config integration")
+    export_parser.add_argument("--dataset-name", type=str, default=None, help="Dataset name inside AI-Toolkit (default: restrained_elegance)")
 
     # Stage 6: Tooling
     train_parser = subparsers.add_parser("train-config", help="Stufe 6: Generate AI-Toolkit Krea 2 RAW training config")

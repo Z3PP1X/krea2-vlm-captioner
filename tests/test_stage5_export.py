@@ -99,3 +99,65 @@ def test_ai_toolkit_yaml_generation(tmp_path: Path):
     assert loaded["dataset"]["default_caption"] == "restrained_elegance"
     assert "buckets" in loaded["dataset"]
     assert len(loaded["dataset"]["subsets"]) == 2
+
+
+def test_ai_toolkit_auto_integration(tmp_path: Path):
+    from pipeline.export.ai_toolkit_integrator import (
+        integrate_with_ai_toolkit,
+        register_dataset_in_sqlite,
+    )
+    import sqlite3
+
+    # Setup mock ai-toolkit directory
+    ai_toolkit_dir = tmp_path / "mock_ai_toolkit"
+    ai_toolkit_dir.mkdir()
+    (ai_toolkit_dir / "run.py").write_text("# mock run.py", encoding="utf-8")
+
+    # Setup mock images dir
+    images_dir = tmp_path / "processed" / "images"
+    images_dir.mkdir(parents=True)
+    (images_dir / "test1.jpg").write_bytes(b"fake image")
+    (images_dir / "test1.txt").write_text("prompt", encoding="utf-8")
+
+    # Setup mock SQLite DB
+    db_path = ai_toolkit_dir / "aitk_db.db"
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        "CREATE TABLE Dataset (id TEXT PRIMARY KEY, name TEXT, folder_path TEXT, caption_ext TEXT, created_at TEXT, updated_at TEXT);"
+    )
+    conn.commit()
+    conn.close()
+
+    # Run integration
+    result = integrate_with_ai_toolkit(
+        images_dir=images_dir,
+        dataset_name="test_dataset",
+        trigger_word="restrained_elegance",
+        custom_ai_toolkit_dir=ai_toolkit_dir,
+    )
+
+    assert result["ai_toolkit_found"] is True
+    assert result["linked"] is True
+    assert result["db_registered"] is True
+    assert result["config_installed"] is True
+
+    # Verify symlink
+    link_path = ai_toolkit_dir / "datasets" / "test_dataset"
+    assert link_path.exists()
+
+    # Verify config installed
+    installed_cfg = ai_toolkit_dir / "config" / "ai_toolkit_krea2_raw.yaml"
+    assert installed_cfg.exists()
+    with open(installed_cfg, "r", encoding="utf-8") as f:
+        cfg = yaml.safe_load(f)
+    assert cfg["config"]["process"][0]["datasets"][0]["folder_path"] == str(images_dir.resolve()).replace("\\", "/")
+
+    # Verify SQLite entry
+    conn = sqlite3.connect(db_path)
+    cur = conn.cursor()
+    cur.execute("SELECT name, folder_path FROM Dataset;")
+    rows = cur.fetchall()
+    conn.close()
+    assert len(rows) == 1
+    assert rows[0][0] == "test_dataset"
+

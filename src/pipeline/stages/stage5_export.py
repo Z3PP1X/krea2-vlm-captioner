@@ -14,6 +14,7 @@ from pipeline.export.ai_toolkit_builder import (
     generate_ai_toolkit_dataset_config,
     write_ai_toolkit_dataset_yaml,
 )
+from pipeline.export.ai_toolkit_integrator import integrate_with_ai_toolkit
 from pipeline.export.musubi_builder import generate_musubi_dataset_toml
 
 try:
@@ -154,6 +155,29 @@ def run_stage5(args: Any, config: Dict[str, Any]) -> int:
         if entry.stages_status.get("stage4_caption") == "captioned" and not entry.is_rejected():
             entry.update_stage("stage5_export", "exported")
     manifest.save()
+
+    # 7. Automated AI-Toolkit Integration (symlink, SQLite DB, training config)
+    auto_link = bool(export_cfg.get("auto_link_ai_toolkit", True))
+    custom_ai_dir = getattr(args, "ai_toolkit_dir", None) or export_cfg.get("ai_toolkit_dir")
+    dataset_name = getattr(args, "dataset_name", None) or export_cfg.get("dataset_name", trigger_word)
+
+    if auto_link:
+        integration = integrate_with_ai_toolkit(
+            images_dir=processed_images_dir,
+            dataset_name=dataset_name,
+            trigger_word=trigger_word,
+            custom_ai_toolkit_dir=custom_ai_dir,
+        )
+        if integration.get("ai_toolkit_found"):
+            logger.info(f"AI-Toolkit Directory detected: {integration['ai_toolkit_dir']}")
+            if integration.get("linked"):
+                logger.info(f"  ✓ Symlink created: {integration['link_path']}")
+            if integration.get("db_registered"):
+                logger.info(f"  ✓ Dataset registered in SQLite DB: {integration['db_path']}")
+            if integration.get("config_installed"):
+                logger.info(f"  ✓ Training config installed: {integration['config_path']}")
+        else:
+            logger.info("AI-Toolkit directory not detected. Automatic integration skipped.")
 
     # Terminal summary display
     if HAVE_RICH and console:

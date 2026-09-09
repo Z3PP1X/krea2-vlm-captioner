@@ -76,6 +76,9 @@ stage5_export:
   max_balance_factor: 4.0             # Maximum repeat multiplier for rare subconcepts
   max_person_dominance_ratio: 0.35    # Warning threshold if a single subject dominates
   aspect_ratio_bucketing: true
+  auto_link_ai_toolkit: true          # Automatically symlink to ai-toolkit/datasets and register config
+  ai_toolkit_dir: "/app/ai-toolkit"   # Path to AI-Toolkit (auto-detected on RunPod)
+  dataset_name: "restrained_elegance" # Name of dataset in AI-Toolkit UI
 
 stage6_training:
   base_model: "krea/krea2-raw"
