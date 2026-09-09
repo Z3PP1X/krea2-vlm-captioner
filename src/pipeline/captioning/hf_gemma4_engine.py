@@ -77,6 +77,7 @@ class Gemma4HfEngine:
         """Generates structured JSON captions for a batch of images using Gemma 4."""
         self._ensure_model_loaded()
         import torch
+        import time
 
         results: List[Optional[Dict[str, Any]]] = []
         schema_json = json.dumps(json_schema, indent=2)
@@ -88,7 +89,10 @@ class Gemma4HfEngine:
             f"Do not write explanations, introductions, or markdown codeblocks. Output only the JSON."
         )
 
-        for img_path, u_prompt in zip(image_paths, user_prompts):
+        total_imgs = len(image_paths)
+        for idx, (img_path, u_prompt) in enumerate(zip(image_paths, user_prompts), start=1):
+            t0 = time.time()
+            logger.info(f" -> [{idx}/{total_imgs}] Captioning '{img_path.name}' with Gemma 4 12B...")
             try:
                 with Image.open(img_path) as pil_img:
                     img_rgb = pil_img.convert("RGB")
@@ -139,9 +143,13 @@ class Gemma4HfEngine:
 
                 parsed = json.loads(clean_json)
                 results.append(parsed)
+                elapsed = time.time() - t0
+                summary_desc = parsed.get("description", "")[:60] if isinstance(parsed, dict) else ""
+                logger.info(f"    ✓ [{idx}/{total_imgs}] Generated in {elapsed:.1f}s: {summary_desc}...")
 
             except Exception as exc:
-                logger.warning(f"Gemma 4 generation failed for {img_path.name}: {exc}")
+                elapsed = time.time() - t0
+                logger.warning(f"    ✗ [{idx}/{total_imgs}] Generation failed for {img_path.name} after {elapsed:.1f}s: {exc}")
                 results.append(None)
 
         return results

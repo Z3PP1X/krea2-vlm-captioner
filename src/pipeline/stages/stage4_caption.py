@@ -237,8 +237,14 @@ def run_stage4(args: Any, config: Dict[str, Any]) -> int:
     sample_records: List[Dict[str, Any]] = []
 
     # Process in batches
-    for batch_start in range(0, len(eligible), batch_size):
+    total_eligible = len(eligible)
+    total_batches = (total_eligible + batch_size - 1) // batch_size
+    logger.info(f"\nStarting Stage 4 processing: {total_eligible} images across {total_batches} batches (batch size: {batch_size})...")
+
+    for batch_idx, batch_start in enumerate(range(0, total_eligible, batch_size), start=1):
         batch_entries = eligible[batch_start : batch_start + batch_size]
+        batch_end = min(batch_start + batch_size, total_eligible)
+        logger.info(f"\n--- Batch {batch_idx}/{total_batches} [Images {batch_start + 1}-{batch_end} of {total_eligible}] ---")
         image_paths = []
         user_prompts = []
 
