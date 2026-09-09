@@ -45,6 +45,7 @@ MAX_TOKENS="340"
 MIN_TOKENS="150"
 PARALLEL_SUB_BATCH="16"
 TIERS="30,40,30"
+SKIP_TOKEN_THRESHOLD="400"
 
 echo "========================================================================"
 echo " Starting Krea 2 Caption Refinement (Google Gemma 4 12B)"
@@ -53,6 +54,8 @@ echo " GPU VRAM Target : RTX PRO 6000 (96GB VRAM)"
 echo " Engine          : Google Gemma 4 12B (google/gemma-4-12B-it)"
 echo " Output Mode     : Pure Raw Text (Zero Token Waste, Programmatic JSON)"
 echo " Tier Mix        : 30% Tags | 40% Short (max 150 tok) | 30% Dense (max 340 tok)"
+echo " Skip Updated    : Exclude existing captions > ${SKIP_TOKEN_THRESHOLD} tokens or with .bak"
+echo " Deduplication   : Hash-based grouping (.jpg.jpg/.thumbs excluded & synced in parallel)"
 echo " Sampling Temp   : ${TEMPERATURE}"
 echo " Parallel Batch  : ${PARALLEL_SUB_BATCH} images concurrent"
 echo " Taxonomy Focus  : Model Position | Bondage Type | Equipment | Rigging"
@@ -65,4 +68,6 @@ python3 scripts/update_dataset_captions.py \
     --min-tokens "${MIN_TOKENS}" \
     --parallel-sub-batch "${PARALLEL_SUB_BATCH}" \
     --tiers "${TIERS}" \
+    --skip-token-threshold "${SKIP_TOKEN_THRESHOLD}" \
     "${EXTRA_ARGS[@]}"
+

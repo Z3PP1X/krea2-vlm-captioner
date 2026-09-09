@@ -18,7 +18,7 @@ import logging
 import argparse
 from datetime import datetime
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 
 # Ensure project root is in sys.path
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -114,7 +114,52 @@ def parse_args():
     parser.add_argument(
         "--force",
         action="store_true",
-        help="Re-refine all captions even if a .txt.bak backup exists.",
+        help="Re-refine all captions even if a .txt.bak backup exists or token count > threshold.",
+    )
+    parser.add_argument(
+        "--skip-token-threshold",
+        type=int,
+        default=400,
+        help="Token length threshold to detect already-updated captions (default: 400). Captions with tokens > threshold will be excluded from the pipeline.",
+    )
+    parser.add_argument(
+        "--skip-updated",
+        dest="skip_updated",
+        action="store_true",
+        default=True,
+        help="Exclude already-updated captions from refinement (default: True).",
+    )
+    parser.add_argument(
+        "--no-skip-updated",
+        dest="skip_updated",
+        action="store_false",
+        help="Do not skip already-updated captions.",
+    )
+    parser.add_argument(
+        "--dedup-by-hash",
+        dest="dedup_by_hash",
+        action="store_true",
+        default=True,
+        help="Deduplicate images sharing the same hash before .jpg, send only primary to VLM, and sync duplicates in parallel (default: True).",
+    )
+    parser.add_argument(
+        "--no-dedup-by-hash",
+        dest="dedup_by_hash",
+        action="store_false",
+        help="Disable hash-based deduplication.",
+    )
+    parser.add_argument(
+        "--sync-duplicates",
+        dest="sync_duplicates",
+        action="store_true",
+        default=True,
+        help="Synchronize captions to duplicate images in parallel (default: True).",
+    )
+    parser.add_argument(
+        "--no-sync-duplicates",
+        dest="sync_duplicates",
+        action="store_false",
+        help="Disable automatic caption synchronization to duplicates.",
     )
     parser.add_argument(
         "--show-captions",
@@ -150,9 +195,154 @@ def parse_args():
     return parser.parse_args()
 
 
-def discover_dataset_items(dataset_dir: Path, force: bool = False) -> List[Dict[str, Any]]:
-    """Discovers image and .txt pairs in a dataset directory."""
-    items = []
+def estimate_token_count(text: str) -> int:
+    """Estimates token count for a caption text string."""
+    if not text:
+        return 0
+    words = text.split()
+    word_tokens = int(len(words) * 1.35)
+    regex_tokens = len(re.findall(r"\w+|[^\w\s]", text))
+    return max(word_tokens, regex_tokens)
+
+
+def is_caption_already_updated(
+    caption: str,
+    bak_path: Optional[Path] = None,
+    token_threshold: int = 400,
+) -> bool:
+    """
+    Checks whether a caption has already been updated in a previous run.
+    Criteria:
+      1. .txt.bak exists (created when previous script updated caption).
+      2. Token count > token_threshold (default 400; old Qwen used max 300 tokens).
+      3. Word count >= 280 words (~400+ tokens).
+    """
+    if not caption or not caption.strip():
+        return False
+    if bak_path and bak_path.exists():
+        return True
+
+    words = caption.split()
+    tokens = estimate_token_count(caption)
+    if tokens > token_threshold or len(words) >= 280:
+        return True
+    return False
+
+
+def extract_hash_key(file_path: Path) -> str:
+    """
+    Extracts the image hash / base identifier before the image extension.
+    Handles:
+      - 068e12987d7b5ee9.jpg -> '068e12987d7b5ee9'
+      - 068e12987d7b5ee9.jpg.jpg -> '068e12987d7b5ee9'
+      - .thumbs/068e12987d7b5ee9.jpg.jpg -> '068e12987d7b5ee9'
+      - 068e12987d7b5ee9_1.jpg -> '068e12987d7b5ee9'
+      - 068e12987d7b5ee9 (1).jpg -> '068e12987d7b5ee9'
+      - image_001.jpg -> 'image_001'
+    """
+    name = file_path.name
+    m = re.match(r"^([0-9a-fA-F]{8,64})", name)
+    if m:
+        return m.group(1).lower()
+    parts = re.split(r"\.(jpe?g|png|webp|bmp)", name, flags=re.IGNORECASE)
+    if parts and parts[0]:
+        return parts[0].strip().lower()
+    return file_path.stem.lower()
+
+
+def rank_primary_candidate(item: Dict[str, Any]) -> tuple:
+    """
+    Ranks candidates sharing the same hash so the true primary image is chosen.
+    Priority:
+      1. Not in a hidden directory (e.g. not in .thumbs, not starting with '.')
+      2. Not double-extended (e.g. .jpg rather than .jpg.jpg)
+      3. Has longer existing caption
+      4. Shorter filename
+      5. Shorter full path
+    """
+    p = item["image_path"]
+    is_hidden_dir = any(part.startswith(".") for part in p.parent.parts)
+    is_double_ext = bool(re.search(r"\.(jpe?g|png|webp|bmp)\.(jpe?g|png|webp|bmp)$", p.name, re.I))
+    cap = item.get("existing_caption", "").strip()
+    cap_len = len(cap.split())
+
+    return (
+        1 if is_hidden_dir else 0,
+        1 if is_double_ext else 0,
+        -cap_len,
+        len(p.name),
+        len(str(p)),
+    )
+
+
+def sync_caption_to_duplicates(
+    primary_item: Dict[str, Any],
+    caption_text: str,
+    backup: bool = True,
+) -> List[str]:
+    """
+    Synchronizes caption_text in parallel to all duplicate image files associated with primary_item.
+    Returns list of duplicate file names that were updated.
+    """
+    synced_names = []
+    duplicates = primary_item.get("duplicates", [])
+    if not duplicates:
+        return synced_names
+
+    for dup in duplicates:
+        dup_img = dup["image_path"]
+        txt_path = dup["txt_path"]
+        bak_path = dup.get("bak_path") or dup_img.with_suffix(".txt.bak")
+
+        target_txts = [txt_path]
+        hash_key = dup.get("hash_key")
+        if hash_key:
+            alt_txt = dup_img.parent / f"{hash_key}.txt"
+            if alt_txt not in target_txts:
+                target_txts.append(alt_txt)
+
+        for target_txt in target_txts:
+            try:
+                target_txt.parent.mkdir(parents=True, exist_ok=True)
+                if backup and target_txt.exists() and not bak_path.exists():
+                    try:
+                        shutil.copy2(target_txt, bak_path)
+                    except Exception:
+                        pass
+                with open(target_txt, "w", encoding="utf-8") as f:
+                    f.write(caption_text.strip() + "\n")
+            except Exception as e:
+                logger.warning(f"Could not sync duplicate caption to {target_txt}: {e}")
+
+        dup["existing_caption"] = caption_text.strip()
+        synced_names.append(dup_img.name)
+
+    return synced_names
+
+
+def discover_dataset_items(
+    dataset_dir: Path,
+    force: bool = False,
+    skip_updated: bool = True,
+    skip_token_threshold: int = 400,
+    dedup_by_hash: bool = True,
+    sync_duplicates: bool = True,
+    no_backup: bool = False,
+) -> Tuple[List[Dict[str, Any]], Dict[str, int]]:
+    """
+    Discovers image and .txt pairs in a dataset directory with hash deduplication
+    and updated-caption exclusion.
+    """
+    discovery_stats = {
+        "total_files": 0,
+        "unique_hashes": 0,
+        "duplicates_detected": 0,
+        "already_updated_skipped": 0,
+        "duplicates_synced_existing": 0,
+        "queued_for_vlm": 0,
+    }
+
+    raw_items = []
     for file_path in sorted(dataset_dir.rglob("*")):
         if file_path.suffix.lower() in IMAGE_EXTENSIONS:
             txt_path = file_path.with_suffix(".txt")
@@ -166,18 +356,92 @@ def discover_dataset_items(dataset_dir: Path, force: bool = False) -> List[Dict[
                 except Exception as e:
                     logger.warning(f"Could not read {txt_path.name}: {e}")
 
-            # Check if already refined
-            is_already_refined = bak_path.exists() and len(existing_caption.split()) >= 220
-            if is_already_refined and not force:
-                continue
-
-            items.append({
+            hash_key = extract_hash_key(file_path) if dedup_by_hash else file_path.name
+            raw_items.append({
                 "image_path": file_path,
                 "txt_path": txt_path,
                 "bak_path": bak_path,
                 "existing_caption": existing_caption,
+                "hash_key": hash_key,
+                "duplicates": [],
             })
-    return items
+
+    discovery_stats["total_files"] = len(raw_items)
+
+    if not dedup_by_hash:
+        items_to_process = []
+        for it in raw_items:
+            is_upd = skip_updated and is_caption_already_updated(
+                it["existing_caption"], it["bak_path"], token_threshold=skip_token_threshold
+            )
+            if is_upd and not force:
+                discovery_stats["already_updated_skipped"] += 1
+                continue
+            items_to_process.append(it)
+        discovery_stats["queued_for_vlm"] = len(items_to_process)
+        return items_to_process, discovery_stats
+
+    # Group by hash key
+    groups: Dict[str, List[Dict[str, Any]]] = {}
+    for it in raw_items:
+        groups.setdefault(it["hash_key"], []).append(it)
+
+    discovery_stats["unique_hashes"] = len(groups)
+    items_to_process = []
+
+    for hash_key, group_items in groups.items():
+        # Rank so the true original image is primary
+        group_items.sort(key=rank_primary_candidate)
+        primary = group_items[0]
+        duplicates = group_items[1:]
+        primary["duplicates"] = duplicates
+        discovery_stats["duplicates_detected"] += len(duplicates)
+
+        # Check if ANY candidate in this group has an already-updated caption
+        best_updated_caption = None
+        for it in group_items:
+            cap = it["existing_caption"]
+            bak = it["bak_path"]
+            if is_caption_already_updated(cap, bak, token_threshold=skip_token_threshold):
+                if best_updated_caption is None or len(cap.split()) > len(best_updated_caption.split()):
+                    best_updated_caption = cap
+
+        group_is_updated = (best_updated_caption is not None)
+
+        if group_is_updated and skip_updated and not force:
+            discovery_stats["already_updated_skipped"] += 1
+            primary["existing_caption"] = best_updated_caption
+
+            # Ensure primary has this updated caption in its .txt
+            if sync_duplicates:
+                p_cap = ""
+                if primary["txt_path"].exists():
+                    try:
+                        with open(primary["txt_path"], "r", encoding="utf-8") as pf:
+                            p_cap = pf.read().strip()
+                    except Exception:
+                        pass
+
+                if p_cap != best_updated_caption:
+                    try:
+                        primary["txt_path"].parent.mkdir(parents=True, exist_ok=True)
+                        with open(primary["txt_path"], "w", encoding="utf-8") as pf:
+                            pf.write(best_updated_caption + "\n")
+                    except Exception as e:
+                        logger.warning(f"Could not sync caption to primary {primary['txt_path']}: {e}")
+
+                # Sync to all duplicates for this already-updated item
+                synced = sync_caption_to_duplicates(
+                    primary, best_updated_caption, backup=not no_backup
+                )
+                discovery_stats["duplicates_synced_existing"] += len(synced)
+
+            continue  # Exclude from VLM queue!
+
+        items_to_process.append(primary)
+
+    discovery_stats["queued_for_vlm"] = len(items_to_process)
+    return items_to_process, discovery_stats
 
 
 def main():
@@ -198,6 +462,7 @@ def main():
 
     # 1. Discover items to refine
     items: List[Dict[str, Any]] = []
+    discovery_stats: Dict[str, int] = {}
 
     if args.dataset_name and not args.dataset_dir:
         candidates = [
@@ -223,8 +488,15 @@ def main():
         if not d_path.exists():
             logger.error(f"Dataset directory not found: {d_path}")
             sys.exit(1)
-        items = discover_dataset_items(d_path, force=args.force)
-        logger.info(f"Discovered {len(items)} image items in {d_path}")
+        items, discovery_stats = discover_dataset_items(
+            d_path,
+            force=args.force,
+            skip_updated=args.skip_updated,
+            skip_token_threshold=args.skip_token_threshold,
+            dedup_by_hash=args.dedup_by_hash,
+            sync_duplicates=args.sync_duplicates,
+            no_backup=args.no_backup,
+        )
     elif args.manifest:
         m_path = Path(args.manifest).resolve()
         if not m_path.exists():
@@ -232,6 +504,7 @@ def main():
             sys.exit(1)
         from pipeline.manifest import Manifest
         manifest = Manifest(str(m_path))
+        raw_manifest_items = []
         for entry in manifest:
             img_p = entry.get_processed_file() or entry.get_raw_file() or Path(entry.processed_path or entry.raw_path or "")
             if img_p and img_p.exists():
@@ -244,14 +517,62 @@ def main():
                             existing_cap = f.read().strip()
                     except Exception:
                         pass
-                items.append({
+                hash_k = extract_hash_key(img_p) if args.dedup_by_hash else img_p.name
+                raw_manifest_items.append({
                     "image_path": img_p,
                     "txt_path": txt_p,
-                    "bak_p": bak_p,
+                    "bak_path": bak_p,
                     "existing_caption": existing_cap,
                     "manifest_entry": entry,
+                    "hash_key": hash_k,
+                    "duplicates": [],
                 })
-        logger.info(f"Discovered {len(items)} items from manifest {m_path}")
+
+        discovery_stats = {
+            "total_files": len(raw_manifest_items),
+            "unique_hashes": len(raw_manifest_items),
+            "duplicates_detected": 0,
+            "already_updated_skipped": 0,
+            "duplicates_synced_existing": 0,
+            "queued_for_vlm": 0,
+        }
+
+        if args.dedup_by_hash:
+            groups: Dict[str, List[Dict[str, Any]]] = {}
+            for it in raw_manifest_items:
+                groups.setdefault(it["hash_key"], []).append(it)
+            discovery_stats["unique_hashes"] = len(groups)
+
+            for hash_k, g_items in groups.items():
+                g_items.sort(key=rank_primary_candidate)
+                primary = g_items[0]
+                dups = g_items[1:]
+                primary["duplicates"] = dups
+                discovery_stats["duplicates_detected"] += len(dups)
+
+                best_upd = None
+                for it in g_items:
+                    cap = it["existing_caption"]
+                    bak = it["bak_path"]
+                    if is_caption_already_updated(cap, bak, token_threshold=args.skip_token_threshold):
+                        if best_upd is None or len(cap.split()) > len(best_upd.split()):
+                            best_upd = cap
+
+                if best_upd and args.skip_updated and not args.force:
+                    discovery_stats["already_updated_skipped"] += 1
+                    primary["existing_caption"] = best_upd
+                    if args.sync_duplicates:
+                        synced = sync_caption_to_duplicates(primary, best_upd, backup=not args.no_backup)
+                        discovery_stats["duplicates_synced_existing"] += len(synced)
+                    continue
+                items.append(primary)
+        else:
+            for it in raw_manifest_items:
+                if args.skip_updated and not args.force and is_caption_already_updated(it["existing_caption"], it["bak_path"], token_threshold=args.skip_token_threshold):
+                    discovery_stats["already_updated_skipped"] += 1
+                    continue
+                items.append(it)
+        discovery_stats["queued_for_vlm"] = len(items)
     else:
         # Default fallback: check common dataset locations
         candidates = [
@@ -266,8 +587,16 @@ def main():
                 found = c
                 break
         if found:
-            items = discover_dataset_items(found, force=args.force)
-            logger.info(f"Auto-selected dataset directory: {found} ({len(items)} items)")
+            items, discovery_stats = discover_dataset_items(
+                found,
+                force=args.force,
+                skip_updated=args.skip_updated,
+                skip_token_threshold=args.skip_token_threshold,
+                dedup_by_hash=args.dedup_by_hash,
+                sync_duplicates=args.sync_duplicates,
+                no_backup=args.no_backup,
+            )
+            logger.info(f"Auto-selected dataset directory: {found}")
             if not args.trigger and "restrained_elegance" in str(found):
                 args.trigger = "restrained_elegance"
                 logger.info("Auto-assigned trigger token: 'restrained_elegance'")
@@ -275,8 +604,21 @@ def main():
             logger.error("Please specify --dataset-name <name> or --dataset-dir <path> or --manifest <path>.")
             sys.exit(1)
 
+    if discovery_stats:
+        logger.info("=" * 70)
+        logger.info("  DISCOVERY & DEDUPLICATION REPORT")
+        logger.info("=" * 70)
+        logger.info(f"Total Image Files Discovered  : {discovery_stats['total_files']}")
+        logger.info(f"Unique Image Hashes           : {discovery_stats['unique_hashes']}")
+        logger.info(f"Duplicate Images Detected     : {discovery_stats['duplicates_detected']} (excluded from VLM queue)")
+        logger.info(f"Already-Updated Captions      : {discovery_stats['already_updated_skipped']} (> {args.skip_token_threshold} tokens or .bak) -> SKIPPED")
+        if discovery_stats['duplicates_synced_existing'] > 0:
+            logger.info(f"Duplicates Synced from Prev   : {discovery_stats['duplicates_synced_existing']} updated in parallel")
+        logger.info(f"Primary Images Queued for VLM : {len(items)}")
+        logger.info("=" * 70 + "\n")
+
     if not items:
-        logger.info("No items require refinement. Use --force to re-refine all items.")
+        logger.info("No items require refinement. All captions are up to date! Use --force to re-refine all items.")
         return
 
     # 2. Prepare System Prompt for Pure Caption Output
@@ -313,6 +655,7 @@ def main():
 
     refined_count = 0
     failed_count = 0
+    parallel_synced_duplicates_count = 0
     total_words_before = 0
     total_words_after = 0
 
@@ -416,6 +759,14 @@ def main():
                 entry.caption_text = caption_text
                 entry.update_stage("stage4_caption", "captioned")
 
+            # Synchronize duplicates in parallel
+            synced_dups = []
+            if args.sync_duplicates and it.get("duplicates"):
+                synced_dups = sync_caption_to_duplicates(
+                    it, caption_text, backup=not args.no_backup
+                )
+                parallel_synced_duplicates_count += len(synced_dups)
+
             w_old = len(it["existing_caption"].split()) if it["existing_caption"] else 0
             w_new = len(caption_text.split())
             approx_tokens = int(w_new * 1.35)
@@ -432,6 +783,8 @@ def main():
                 live_log_path = txt_path.parent / "live_captions.log"
                 with open(live_log_path, "a", encoding="utf-8") as lf:
                     lf.write(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {it['image_path'].name} {tier_label} | {w_new}w (~{approx_tokens} tokens)\n")
+                    if synced_dups:
+                        lf.write(f"  ↳ Synced {len(synced_dups)} duplicate(s) in parallel: {', '.join(synced_dups)}\n")
                     lf.write(caption_text + "\n\n" + ("=" * 80) + "\n\n")
             except Exception:
                 pass
@@ -442,22 +795,32 @@ def main():
                 print(f"    Tier    : {tier_name.capitalize()} (Target: {tier_dist[0]}% tags / {tier_dist[1]}% short / {tier_dist[2]}% dense)")
                 print(f"    Metrics : {w_old}w -> {w_new}w (~{approx_tokens} tokens)")
                 print(f"    Saved To: {txt_path}")
+                if synced_dups:
+                    print(f"    ↳ Synced {len(synced_dups)} duplicate(s) in parallel: {', '.join(synced_dups[:4])}{'...' if len(synced_dups) > 4 else ''}")
                 print("─" * 78)
                 print(caption_text)
                 print("─" * 78 + "\n")
             else:
+                dup_str = f" (+{len(synced_dups)} dups synced)" if synced_dups else ""
                 logger.info(
-                    f"  ✓ {tier_label} {it['image_path'].name}: {w_old}w -> {w_new}w (~{approx_tokens} tokens) | {caption_text[:65]}..."
+                    f"  ✓ {tier_label} {it['image_path'].name}{dup_str}: {w_old}w -> {w_new}w (~{approx_tokens} tokens) | {caption_text[:65]}..."
                 )
 
     logger.info("\n" + "=" * 70)
     logger.info("  DATASET CAPTION REFINEMENT COMPLETED")
     logger.info("=" * 70)
-    logger.info(f"Total Items Processed : {total_items}")
-    logger.info(f"Successfully Refined  : {refined_count}")
-    logger.info(f"Failed / Skipped      : {failed_count}")
+    if discovery_stats:
+        logger.info(f"Total Discovered Files        : {discovery_stats.get('total_files', 0)}")
+        logger.info(f"Unique Image Hashes           : {discovery_stats.get('unique_hashes', 0)}")
+        logger.info(f"Duplicates Detected           : {discovery_stats.get('duplicates_detected', 0)}")
+        logger.info(f"Already-Updated (Skipped)     : {discovery_stats.get('already_updated_skipped', 0)}")
+        if discovery_stats.get('duplicates_synced_existing', 0) > 0:
+            logger.info(f"Duplicates Synced from Prev   : {discovery_stats.get('duplicates_synced_existing', 0)}")
+    logger.info(f"Primary Images Refined (VLM)  : {refined_count}")
+    logger.info(f"Duplicates Synced in Parallel : {parallel_synced_duplicates_count}")
+    logger.info(f"Failed / Errors               : {failed_count}")
     logger.info("-" * 70)
-    logger.info("  STRATIFIED TIER BREAKDOWN:")
+    logger.info("  STRATIFIED TIER BREAKDOWN (Refined Primaries):")
     for t_name, s_data in tier_stats.items():
         c = s_data["count"]
         pct = (c / max(1, refined_count)) * 100
