@@ -38,6 +38,10 @@ class QwenVLEngine:
         if self._llm is not None:
             return
 
+        import os
+        # Disable flashinfer sampler to avoid nvcc JIT compilation in containers without full CUDA toolkit
+        os.environ.setdefault("VLLM_USE_FLASHINFER_SAMPLER", "0")
+
         try:
             from vllm import LLM
             logger.info(f"Loading vLLM Offline Engine with {self.model_name} (GPU util: {self.gpu_memory_utilization})...")
