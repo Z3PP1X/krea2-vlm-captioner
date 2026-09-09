@@ -16,6 +16,7 @@ import time
 import shutil
 import logging
 import argparse
+from datetime import datetime
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 
@@ -112,6 +113,19 @@ def parse_args():
         "--force",
         action="store_true",
         help="Re-refine all captions even if a .txt.bak backup exists.",
+    )
+    parser.add_argument(
+        "--show-captions",
+        dest="show_captions",
+        action="store_true",
+        default=True,
+        help="Display full generated captions in the terminal as they are processed (default: True).",
+    )
+    parser.add_argument(
+        "--no-show-captions",
+        dest="show_captions",
+        action="store_false",
+        help="Disable full caption terminal printing (only show summary lines).",
     )
     parser.add_argument(
         "-v", "--verbose",
@@ -385,9 +399,27 @@ def main():
             total_words_after += w_new
             refined_count += 1
 
-            logger.info(
-                f"  ✓ [REFINED] {it['image_path'].name}: {w_old}w -> {w_new}w (~{approx_tokens} tokens) | {caption_text[:65]}..."
-            )
+            # Append to live monitor log file
+            try:
+                live_log_path = txt_path.parent / "live_captions.log"
+                with open(live_log_path, "a", encoding="utf-8") as lf:
+                    lf.write(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {it['image_path'].name} | {w_new}w (~{approx_tokens} tokens)\n")
+                    lf.write(caption_text + "\n\n" + ("=" * 80) + "\n\n")
+            except Exception:
+                pass
+
+            if args.show_captions:
+                print("\n" + "─" * 78)
+                print(f"  ✓ [REFINED] {it['image_path'].name}")
+                print(f"    Metrics : {w_old}w -> {w_new}w (~{approx_tokens} tokens)")
+                print(f"    Saved To: {txt_path}")
+                print("─" * 78)
+                print(caption_text)
+                print("─" * 78 + "\n")
+            else:
+                logger.info(
+                    f"  ✓ [REFINED] {it['image_path'].name}: {w_old}w -> {w_new}w (~{approx_tokens} tokens) | {caption_text[:65]}..."
+                )
 
     logger.info("\n" + "=" * 70)
     logger.info("  DATASET CAPTION REFINEMENT COMPLETED")
