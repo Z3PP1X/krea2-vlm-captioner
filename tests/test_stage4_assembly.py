@@ -73,3 +73,18 @@ def test_evasion_pattern_detection():
     is_evasive, reason = check_evasion_or_invalid(short_data, min_desc_chars=25, evasion_patterns=evasion_regexes)
     assert is_evasive
     assert "too short" in reason
+
+
+def test_qwen_model_aliases():
+    model_aliases = {
+        "3.8": "Qwen/Qwen2.5-VL-3B-Instruct",
+        "3.8b": "Qwen/Qwen2.5-VL-3B-Instruct",
+        "qwen3.8": "Qwen/Qwen2.5-VL-3B-Instruct",
+        "qwen3.8b": "Qwen/Qwen2.5-VL-3B-Instruct",
+        "qwen-3.8": "Qwen/Qwen2.5-VL-3B-Instruct",
+        "qwen-3.8b": "Qwen/Qwen2.5-VL-3B-Instruct",
+        "krea2": "Qwen/Qwen2.5-VL-3B-Instruct",
+    }
+    for alias, expected in model_aliases.items():
+        assert model_aliases.get(alias.lower().strip()) == expected
+

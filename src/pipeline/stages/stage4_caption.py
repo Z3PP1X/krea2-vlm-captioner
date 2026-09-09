@@ -66,7 +66,24 @@ def run_stage4(args: Any, config: Dict[str, Any]) -> int:
     json_schema = get_vllm_json_schema(vocab)
     system_prompt = build_system_prompt(vocab)
 
-    model_name = getattr(args, "model", None) or cap_cfg.get("model_name", "Qwen/Qwen2.5-VL-7B-Instruct")
+    raw_model = getattr(args, "model", None) or cap_cfg.get("model_name", "Qwen/Qwen2.5-VL-3B-Instruct")
+    model_aliases = {
+        "3.8": "Qwen/Qwen2.5-VL-3B-Instruct",
+        "3.8b": "Qwen/Qwen2.5-VL-3B-Instruct",
+        "qwen3.8": "Qwen/Qwen2.5-VL-3B-Instruct",
+        "qwen3.8b": "Qwen/Qwen2.5-VL-3B-Instruct",
+        "qwen-3.8": "Qwen/Qwen2.5-VL-3B-Instruct",
+        "qwen-3.8b": "Qwen/Qwen2.5-VL-3B-Instruct",
+        "qwen-vl-3.8": "Qwen/Qwen2.5-VL-3B-Instruct",
+        "qwen-vl-3.8b": "Qwen/Qwen2.5-VL-3B-Instruct",
+        "krea2": "Qwen/Qwen2.5-VL-3B-Instruct",
+        "7b": "Qwen/Qwen2.5-VL-7B-Instruct",
+        "qwen7b": "Qwen/Qwen2.5-VL-7B-Instruct",
+        "qwen-7b": "Qwen/Qwen2.5-VL-7B-Instruct",
+        "27b": "Qwen/Qwen3.8-27B",
+        "qwen27b": "Qwen/Qwen3.8-27B",
+    }
+    model_name = model_aliases.get(raw_model.lower().strip(), raw_model)
     batch_size = getattr(args, "batch_size", None) or int(cap_cfg.get("batch_size", 16))
     trigger_word = getattr(args, "trigger", None) or cap_cfg.get("trigger_word", "restrained_elegance")
     caption_mode = getattr(args, "mode", None) or cap_cfg.get("caption_mode", "style")
@@ -97,11 +114,17 @@ def run_stage4(args: Any, config: Dict[str, Any]) -> int:
     logger.info(f"Sample Mode           : {sample_size if sample_size else 'Full Dataset'}")
     logger.info("=" * 60)
 
-    # 1. Gather eligible items
+    # 1. Gather eligible items (including self-healing recovery for transient vllm_error)
     eligible = [
         e for e in manifest
         if e.stages_status.get("stage3_downscale") == "done"
-        and e.stages_status.get("stage4_caption") in ["pending", None]
+        and (
+            e.stages_status.get("stage4_caption") in ["pending", None]
+            or (
+                e.stages_status.get("stage4_caption") == "failed"
+                and any("vllm_error" in r for r in e.rejection_reasons)
+            )
+        )
     ]
 
     if sample_size and sample_size < len(eligible):
@@ -121,6 +144,12 @@ def run_stage4(args: Any, config: Dict[str, Any]) -> int:
         temperature=float(cap_cfg.get("temperature", 0.2)),
         max_tokens=int(cap_cfg.get("max_tokens", 250)),
     )
+
+    try:
+        engine._ensure_model_loaded()
+    except RuntimeError as exc:
+        logger.error(f"Cannot initialize Stage 4 engine: {exc}")
+        return 1
 
     captioned_count = 0
     screened_out_count = 0
@@ -197,6 +226,7 @@ def run_stage4(args: Any, config: Dict[str, Any]) -> int:
 
             if not passed_screen:
                 logger.info(f"[SCREENING REJECT] {img_path.name}: {screen_reasons}")
+                entry.rejection_reasons = [r for r in entry.rejection_reasons if not r.startswith("vllm_error")]
                 entry.caption_data = res_data
                 entry.update_stage("stage4_caption", "rejected_screening", reasons=screen_reasons)
                 screened_out_count += 1
@@ -225,6 +255,7 @@ def run_stage4(args: Any, config: Dict[str, Any]) -> int:
 
             rel_txt_path = os.path.relpath(txt_path, Path(general_cfg.get("manifest_path", "data")).parent).replace("\\", "/")
 
+            entry.rejection_reasons = [r for r in entry.rejection_reasons if not r.startswith("vllm_error")]
             entry.caption_data = res_data
             entry.caption_text = caption_text
             entry.caption_path = rel_txt_path
