@@ -41,6 +41,23 @@ class QwenVLEngine:
         import os
         # Disable flashinfer sampler to avoid nvcc JIT compilation in containers without full CUDA toolkit
         os.environ.setdefault("VLLM_USE_FLASHINFER_SAMPLER", "0")
+        # Disable experimental v1 engine to ensure stable multimodal inference
+        os.environ.setdefault("VLLM_USE_V1", "0")
+
+        # Compatibility patch for transformers Qwen2Tokenizer vs vLLM tokenizer cache
+        try:
+            from transformers.tokenization_utils_base import PreTrainedTokenizerBase
+            if not hasattr(PreTrainedTokenizerBase, "all_special_tokens_extended"):
+                PreTrainedTokenizerBase.all_special_tokens_extended = property(
+                    lambda self: getattr(self, "all_special_tokens", [])
+                )
+            import transformers
+            for tok_name in ["PreTrainedTokenizer", "Qwen2Tokenizer"]:
+                tok_cls = getattr(transformers, tok_name, None)
+                if tok_cls is not None and not hasattr(tok_cls, "all_special_tokens_extended"):
+                    setattr(tok_cls, "all_special_tokens_extended", property(lambda self: getattr(self, "all_special_tokens", [])))
+        except Exception as tok_err:
+            logger.debug(f"Tokenizer compatibility patch skipped: {tok_err}")
 
         try:
             from vllm import LLM

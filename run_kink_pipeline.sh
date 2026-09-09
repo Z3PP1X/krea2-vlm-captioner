@@ -16,6 +16,7 @@ fi
 
 # 2. Set HuggingFace cache and optimize vLLM on RTX PRO 6000
 export VLLM_USE_FLASHINFER_SAMPLER=0
+export VLLM_USE_V1=0
 export TOKENIZERS_PARALLELISM=false
 
 echo "========================================================================"
