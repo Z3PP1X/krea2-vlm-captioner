@@ -175,10 +175,11 @@ def run_stage4(args: Any, config: Dict[str, Any]) -> int:
         return 0
 
     # 2. Initialize VLM Engine
+    max_model_len = getattr(args, "max_model_len", None) or int(cap_cfg.get("max_model_len", 12288))
     engine = QwenVLEngine(
         model_name=model_name,
         gpu_memory_utilization=float(cap_cfg.get("vllm_gpu_memory_utilization", 0.85)),
-        max_model_len=int(cap_cfg.get("max_model_len", 4096)),
+        max_model_len=max_model_len,
         temperature=float(cap_cfg.get("temperature", 0.2)),
         max_tokens=int(cap_cfg.get("max_tokens", 250)),
     )
@@ -217,13 +218,27 @@ def run_stage4(args: Any, config: Dict[str, Any]) -> int:
                 json_schema=json_schema,
             )
         except Exception as exc:
-            logger.error(f"vLLM Batch Generation Error: {exc}")
-            for entry in batch_entries:
-                entry.update_stage("stage4_caption", "failed", reasons=[f"vllm_error_{type(exc).__name__}"])
-            continue
+            logger.warning(f"Batch generation exception: {exc}. Retrying batch items individually...")
+            results = []
+            for img_p, u_p, b_entry in zip(image_paths, user_prompts, batch_entries):
+                try:
+                    single_res = engine.generate_batch(
+                        image_paths=[img_p],
+                        user_prompts=[u_p],
+                        system_prompt=system_prompt,
+                        json_schema=json_schema,
+                    )
+                    results.append(single_res[0])
+                except Exception as single_exc:
+                    logger.error(f"Single image {img_p.name} failed: {single_exc}")
+                    b_entry.update_stage("stage4_caption", "failed", reasons=[f"vllm_error_{type(single_exc).__name__}"])
+                    results.append(None)
 
         # Inspect and evaluate each result
         for entry, img_path, res_data in zip(batch_entries, image_paths, results):
+            if res_data is None:
+                failed_count += 1
+                continue
             # Check for evasion or invalid output with retry attempt
             is_evasive, ev_reason = check_evasion_or_invalid(res_data, min_desc_chars, evasion_patterns)
             attempt = 0

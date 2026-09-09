@@ -42,7 +42,7 @@ stage4_caption:
   backend: "vllm_offline"             # 'vllm_offline' (native GPU batching) or 'openai_compat'
   model_name: "Qwen/Qwen2.5-VL-3B-Instruct"  # Qwen 3.8B (nativer Krea 2 Text-Encoder / VLM mit 3.8 Mrd. Parametern)
   vllm_gpu_memory_utilization: 0.85
-  max_model_len: 4096
+  max_model_len: 12288                # Expanded context to comfortably fit high-res visual tokens + text prompts
   batch_size: 16
   temperature: 0.2
   max_tokens: 250
