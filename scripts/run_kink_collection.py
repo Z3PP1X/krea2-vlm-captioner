@@ -318,6 +318,9 @@ def main():
     parser.add_argument("--batch-size", type=int, default=32, help="Pipeline batch size (default: 32)")
     parser.add_argument("--parallel-sub-batch", type=int, default=8, help="Parallel GPU tensor batch size for Gemma 4 (default: 8, up to 16-24 for 96GB VRAM)")
     parser.add_argument("--model", type=str, default="google/gemma-4-12B-it", help="Model name (default: google/gemma-4-12B-it)")
+    parser.add_argument("--temperature", type=float, default=0.75, help="Caption generation temperature (default: 0.75)")
+    parser.add_argument("--max-tokens", type=int, default=750, help="Max generation tokens for Gemma 4 (default: 750)")
+    parser.add_argument("--refine-captions", action="store_true", help="Audit and enhance existing captions into 400+ token Krea 2 narratives")
     parser.add_argument("--dataset-name", type=str, default="kink_collection", help="Unified dataset name in AI-Toolkit (default: kink_collection)")
     parser.add_argument("--skip-crawl", action="store_true", help="Skip Stage 1 crawl and jump to processing")
     parser.add_argument("--skip-qc", action="store_true", help="Skip Stage 2 QC")
@@ -416,11 +419,15 @@ def main():
     # STAGE 4: CAPTIONING WITH GEMMA 4 12B
     # --------------------------------------------------------------------------
     if not args.skip_caption:
-        logger.info(f"\n>>> STARTING STAGE 4: GEMMA 4 12B MULTIMODAL CAPTIONING <<<")
+        mode_label = "REFINEMENT" if args.refine_captions else "INITIAL GENERATION"
+        logger.info(f"\n>>> STARTING STAGE 4: GEMMA 4 12B CAPTIONING ({mode_label}, >= 400 TOKENS, TEMP {args.temperature}) <<<")
         args_caption = argparse.Namespace(
             model=args.model,
             batch_size=args.batch_size,
             parallel_sub_batch=args.parallel_sub_batch,
+            temperature=args.temperature,
+            max_tokens=args.max_tokens,
+            refine_captions=args.refine_captions,
             trigger=None,          # Uses per-item trigger_word: 'kink, <category>'!
             mode="style",
             max_model_len=8192,
@@ -433,6 +440,8 @@ def main():
         config.setdefault("stage4_caption", {})
         config["stage4_caption"]["vllm_gpu_memory_utilization"] = 0.90
         config["stage4_caption"]["max_model_len"] = 8192
+        config["stage4_caption"]["temperature"] = args.temperature
+        config["stage4_caption"]["max_tokens"] = args.max_tokens
         from pipeline.stages.stage4_caption import run_stage4
         run_stage4(args_caption, config)
     else:

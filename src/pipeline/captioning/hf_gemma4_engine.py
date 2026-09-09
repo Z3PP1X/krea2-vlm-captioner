@@ -24,8 +24,8 @@ class Gemma4HfEngine:
         self,
         model_name: str = "google/gemma-4-12B-it",
         device_map: str = "auto",
-        temperature: float = 0.2,
-        max_tokens: int = 350,
+        temperature: float = 0.75,
+        max_tokens: int = 750,
         parallel_sub_batch_size: int = 8,
     ):
         self.model_name = model_name

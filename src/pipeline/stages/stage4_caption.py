@@ -137,13 +137,25 @@ def run_stage4(args: Any, config: Dict[str, Any]) -> int:
 
     force = bool(getattr(args, "force", False))
     retry_failed = bool(getattr(args, "retry_failed", True))
+    refine_mode = bool(getattr(args, "refine_captions", False) or getattr(args, "refine", False))
+
+    if refine_mode:
+        logger.info("Refinement Mode Active: Auditing and expanding existing captions into 400+ token Krea 2 narratives.")
 
     # 1. Gather eligible items
     # Check if stage 3 downscaling was run
     downscale_done_count = sum(1 for e in manifest if e.stages_status.get("stage3_downscale") == "done")
     recheck_screening = (not reject_watermark or not reject_text or no_screening)
 
-    if downscale_done_count > 0:
+    if refine_mode:
+        # In refinement mode, select all entries that have passed QC or are already captioned
+        eligible = [
+            e for e in manifest
+            if e.stages_status.get("stage4_caption") == "captioned"
+            or e.stages_status.get("stage3_downscale") == "done"
+            or e.stages_status.get("stage2_qc") == "passed"
+        ]
+    elif downscale_done_count > 0:
         eligible = [
             e for e in manifest
             if e.stages_status.get("stage3_downscale") == "done"
@@ -208,14 +220,17 @@ def run_stage4(args: Any, config: Dict[str, Any]) -> int:
 
     # 2. Initialize VLM Engine
     max_model_len = getattr(args, "max_model_len", None) or int(cap_cfg.get("max_model_len", 12288))
+    temperature = float(getattr(args, "temperature", None) or cap_cfg.get("temperature", 0.75))
+    max_tokens = int(getattr(args, "max_tokens", None) or cap_cfg.get("max_tokens", 750))
     m_lower = model_name.lower()
+
     if "gemma-4" in m_lower or "gemma4" in m_lower:
         from pipeline.captioning.hf_gemma4_engine import Gemma4HfEngine
         parallel_sub_batch = getattr(args, "parallel_sub_batch", None) or min(batch_size, 16)
         engine = Gemma4HfEngine(
             model_name=model_name,
-            temperature=float(cap_cfg.get("temperature", 0.2)),
-            max_tokens=int(cap_cfg.get("max_tokens", 350)),
+            temperature=temperature,
+            max_tokens=max_tokens,
             parallel_sub_batch_size=int(parallel_sub_batch),
         )
     else:
@@ -223,8 +238,8 @@ def run_stage4(args: Any, config: Dict[str, Any]) -> int:
             model_name=model_name,
             gpu_memory_utilization=float(cap_cfg.get("vllm_gpu_memory_utilization", 0.85)),
             max_model_len=max_model_len,
-            temperature=float(cap_cfg.get("temperature", 0.2)),
-            max_tokens=int(cap_cfg.get("max_tokens", 250)),
+            temperature=temperature,
+            max_tokens=max_tokens,
         )
 
     try:
@@ -241,7 +256,7 @@ def run_stage4(args: Any, config: Dict[str, Any]) -> int:
     # Process in batches
     total_eligible = len(eligible)
     total_batches = (total_eligible + batch_size - 1) // batch_size
-    logger.info(f"\nStarting Stage 4 processing: {total_eligible} images across {total_batches} batches (batch size: {batch_size})...")
+    logger.info(f"\nStarting Stage 4 processing: {total_eligible} images across {total_batches} batches (batch size: {batch_size}, target: >= 400 tokens, temp: {temperature})...")
 
     for batch_idx, batch_start in enumerate(range(0, total_eligible, batch_size), start=1):
         batch_entries = eligible[batch_start : batch_start + batch_size]
@@ -254,9 +269,34 @@ def run_stage4(args: Any, config: Dict[str, Any]) -> int:
             p = entry.get_processed_file() or entry.get_raw_file() or Path(entry.processed_path or entry.raw_path or "")
             image_paths.append(p)
             context = f"Context: {entry.context_title}. Tags: {', '.join(entry.context_tags)}" if entry.context_tags else ""
-            user_prompts.append(
-                f"Inspect this image objectively and output the structured JSON conforming to the schema. {context}"
-            )
+
+            # Check for existing caption for refinement
+            existing_caption = ""
+            txt_p = p.with_suffix(".txt")
+            if txt_p.exists():
+                try:
+                    with open(txt_p, "r", encoding="utf-8") as f_old:
+                        existing_caption = f_old.read().strip()
+                except Exception:
+                    pass
+            if not existing_caption and entry.caption_text:
+                existing_caption = entry.caption_text.strip()
+
+            if refine_mode and existing_caption:
+                user_prompts.append(
+                    f"Existing Draft Caption: \"{existing_caption}\"\n"
+                    f"Refinement Task: Audit and elevate this draft caption into an exhaustive 7-layer Krea 2 visual narrative. "
+                    f"Correct any visual errors or inaccurate shibari/hardware terms. The output 'caption_dense' MUST be at least 400 tokens long "
+                    f"(approx. 280-350+ words in detailed natural English), thoroughly detailing subject anatomy, body tension, exact knot patterns "
+                    f"or bondage hardware, tactile textures, studio environment, lighting gradients, and camera optics. {context}"
+                )
+            else:
+                user_prompts.append(
+                    f"Task: Inspect this image and generate an exhaustive 7-layer Krea 2 visual narrative. "
+                    f"The output 'caption_dense' MUST be at least 400 tokens long (approx. 280-350+ words in detailed natural English), "
+                    f"meticulously detailing subject anatomy, body tension, exact shibari knots or bondage hardware, tactile textures, "
+                    f"studio environment, lighting gradients, and camera optics. {context}"
+                )
 
         # Generate outputs
         try:
@@ -361,8 +401,17 @@ def run_stage4(args: Any, config: Dict[str, Any]) -> int:
                 template=template,
             )
 
-            # Write .txt alongside image
+            # Write .txt alongside image (with backup if refining)
             txt_path = img_path.with_suffix(".txt")
+            if refine_mode and txt_path.exists():
+                bak_path = img_path.with_suffix(".txt.bak")
+                if not bak_path.exists():
+                    try:
+                        import shutil
+                        shutil.copy2(txt_path, bak_path)
+                    except Exception:
+                        pass
+
             with open(txt_path, "w", encoding="utf-8") as f:
                 f.write(caption_text + "\n")
 
@@ -388,7 +437,10 @@ def run_stage4(args: Any, config: Dict[str, Any]) -> int:
                     "reasons": [],
                 })
 
-            logger.info(f"[CAPTIONED] {img_path.name} -> {caption_text[:70]}...")
+            tag_label = "[REFINED]" if refine_mode else "[CAPTIONED]"
+            w_count = len(caption_text.split())
+            approx_tok = int(w_count * 1.35)
+            logger.info(f"{tag_label} {img_path.name} ({w_count} words, ~{approx_tok} tokens) -> {caption_text[:75]}...")
 
         # Periodic manifest save
         manifest.save()

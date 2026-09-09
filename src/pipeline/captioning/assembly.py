@@ -21,11 +21,23 @@ def assemble_caption(
 ) -> str:
     """Constructs the natural language training caption from JSON annotation fields.
     
-    In 'style' mode:
-        The specific style name is omitted to allow the LoRA weights to absorb the style.
-    In 'subject' mode:
-        All descriptors including style and location are explicitly verbalized.
+    If 'caption_dense' (the full 7-layer Krea 2 narrative) is present, it is used
+    as the primary caption with the trigger word guaranteed at Token 0.
+    Otherwise, falls back to composing style, location, description, and lighting_camera.
     """
+    trigger_str = trigger_word.strip() if trigger_word else ""
+    caption_dense = str(data.get("caption_dense", "")).strip()
+
+    # If modern 7-layer caption_dense is available, use it directly!
+    if caption_dense and len(caption_dense.split()) >= 25:
+        if trigger_str:
+            # Check if trigger is already prepended
+            t_clean = trigger_str.rstrip(", ").lower()
+            if not caption_dense.lower().startswith(t_clean):
+                caption_dense = f"{trigger_str} {caption_dense}"
+        return re.sub(r"\s+", " ", caption_dense).strip()
+
+    # Fallback to modular composition
     style_raw = data.get("style", "")
     location_raw = data.get("location", "")
     pose_raw = data.get("pose", "")
@@ -35,7 +47,6 @@ def assemble_caption(
     # Humanize vocabulary tokens
     style_str = "" if caption_mode == "style" else humanize_tag(style_raw)
     location_str = humanize_tag(location_raw)
-    trigger_str = trigger_word.strip() if trigger_word else ""
 
     # Assemble components
     parts = []
@@ -46,7 +57,6 @@ def assemble_caption(
     if location_str:
         parts.append(f"Set in a {location_str}.")
     if description:
-        # Ensure description ends with a period if missing
         desc_clean = description.rstrip(". ") + "."
         parts.append(desc_clean)
     if lighting_camera:
@@ -54,6 +64,5 @@ def assemble_caption(
         parts.append(light_clean)
 
     caption = " ".join([p for p in parts if p]).strip()
-    # Normalize multiple whitespace
     caption = re.sub(r"\s+", " ", caption)
     return caption
