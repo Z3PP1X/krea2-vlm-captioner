@@ -31,7 +31,7 @@ def run_stage2(args: Any, config: Dict[str, Any]) -> int:
     manifest_path = general_cfg.get("manifest_path", "data/manifest.jsonl")
     manifest = Manifest(manifest_path)
 
-    min_edge = int(qc_cfg.get("min_edge_px", 1024))
+    min_edge = getattr(args, "min_edge", None) or int(qc_cfg.get("min_edge_px", 512))
     laplacian_min = float(qc_cfg.get("laplacian_variance_min", 100.0))
     phash_threshold = int(qc_cfg.get("phash_hamming_threshold", 6))
     detect_watermarks = qc_cfg.get("detect_watermarks", True)
@@ -39,6 +39,7 @@ def run_stage2(args: Any, config: Dict[str, Any]) -> int:
     convert_srgb = qc_cfg.get("convert_srgb", True)
 
     workers = getattr(args, "max_workers", None) or os.cpu_count() or 8
+    force = bool(getattr(args, "force", False))
 
     logger.info("=" * 60)
     logger.info("  STUFE 2: QUALITÄTSKONTROLLE & DEDUPLIZIERUNG")
@@ -50,14 +51,26 @@ def run_stage2(args: Any, config: Dict[str, Any]) -> int:
     logger.info(f"Detect Watermarks     : {detect_watermarks}")
     logger.info(f"sRGB Normalization    : {convert_srgb}")
     logger.info(f"EXIF Stripping        : {strip_exif}")
+    logger.info(f"Force Mode            : {force}")
     logger.info("=" * 60)
 
-    # Process all entries ready for QC (including recovering any falsely marked missing_raw_file)
-    eligible_entries = [
-        e for e in manifest
-        if e.stages_status.get("stage1_crawl") == "downloaded"
-        and (e.stages_status.get("stage2_qc") in ["pending", None] or "missing_raw_file" in e.rejection_reasons)
-    ]
+    # Re-evaluate all entries if force is set or if previous resolution rejections exist
+    has_res_rejections = any(any(r.startswith("min_edge_below_") for r in e.rejection_reasons) for e in manifest)
+    recheck_all = force or has_res_rejections
+
+    if recheck_all:
+        if has_res_rejections and not force:
+            logger.info("Detected previous resolution rejections. Re-evaluating dataset with updated min_edge threshold...")
+        eligible_entries = [
+            e for e in manifest
+            if e.stages_status.get("stage1_crawl") == "downloaded"
+        ]
+    else:
+        eligible_entries = [
+            e for e in manifest
+            if e.stages_status.get("stage1_crawl") == "downloaded"
+            and (e.stages_status.get("stage2_qc") in ["pending", None] or "missing_raw_file" in e.rejection_reasons)
+        ]
 
     logger.info(f"Found {len(eligible_entries)} items eligible for QC.")
     if not eligible_entries:
@@ -73,8 +86,18 @@ def run_stage2(args: Any, config: Dict[str, Any]) -> int:
             entry.update_stage("stage2_qc", "failed", reasons=["missing_raw_file"])
             return ("failed", ["missing_raw_file"], entry)
 
-        if "missing_raw_file" in entry.rejection_reasons:
-            entry.rejection_reasons.remove("missing_raw_file")
+        # Clear prior QC rejections before re-evaluating
+        entry.rejection_reasons = [
+            r for r in entry.rejection_reasons
+            if not (
+                r.startswith("min_edge_below_")
+                or r.startswith("duplicate_phash_")
+                or r.startswith("watermark_detected_")
+                or r == "blurry_laplacian_low"
+                or r.startswith("qc_exception_")
+                or r == "missing_raw_file"
+            )
+        ]
         entry.raw_path = str(raw_path).replace("\\", "/")
 
         try:
@@ -93,7 +116,7 @@ def run_stage2(args: Any, config: Dict[str, Any]) -> int:
 
                 reasons: List[str] = []
 
-                # 2. Resolution check (Minimum edge >= 1024px)
+                # 2. Resolution check (Minimum edge >= min_edge px)
                 if min(w, h) < min_edge:
                     reasons.append(f"min_edge_below_{min_edge}")
 
@@ -171,14 +194,16 @@ def run_stage2(args: Any, config: Dict[str, Any]) -> int:
             item = cluster[0]
             item["entry"].phash_cluster_id = cluster_id
             item["entry"].update_stage("stage2_qc", "passed")
-            item["entry"].stages_status["stage3_downscale"] = "pending"
+            if item["entry"].stages_status.get("stage3_downscale") != "done":
+                item["entry"].stages_status["stage3_downscale"] = "pending"
         else:
             # Multi-item duplicate cluster: sort by quality score descending
             cluster.sort(key=lambda x: x["score"], reverse=True)
             best_item = cluster[0]
             best_item["entry"].phash_cluster_id = cluster_id
             best_item["entry"].update_stage("stage2_qc", "passed")
-            best_item["entry"].stages_status["stage3_downscale"] = "pending"
+            if best_item["entry"].stages_status.get("stage3_downscale") != "done":
+                best_item["entry"].stages_status["stage3_downscale"] = "pending"
 
             # Mark all others as duplicate rejects
             for dup in cluster[1:]:

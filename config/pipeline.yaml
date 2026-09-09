@@ -21,7 +21,7 @@ stage1_crawl:
   user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 
 stage2_qc:
-  min_edge_px: 1024                   # Minimum width and height for actual image file
+  min_edge_px: 512                    # Minimum width and height for actual image file (reduced from 1024 to 512)
   convert_srgb: true                  # Normalize color profile to sRGB
   strip_exif: true                    # Remove metadata / privacy leaks
   phash_hamming_threshold: 6          # Hamming distance <= 6 is considered duplicate cluster

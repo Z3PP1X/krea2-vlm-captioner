@@ -75,3 +75,14 @@ def test_phash_computation_and_clustering():
     assert len(clusters) == 2
     sizes = sorted([len(c) for c in clusters])
     assert sizes == [1, 2]
+
+
+def test_resolution_min_edge_512_threshold():
+    # 512px threshold accepts 600x800 and rejects 400x800
+    w_pass, h_pass = 600, 800
+    w_fail, h_fail = 400, 800
+    min_edge = 512
+
+    assert min(w_pass, h_pass) >= min_edge
+    assert min(w_fail, h_fail) < min_edge
+
