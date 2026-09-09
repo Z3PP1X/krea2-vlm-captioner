@@ -34,6 +34,10 @@ from pipeline.crawler.dbnaked import (
     extract_dbnaked_gallery_candidates,
     DBNAKED_HEADERS,
 )
+from pipeline.crawler.scrolller import (
+    is_scrolller_url,
+    fetch_scrolller_candidates,
+)
 
 logger = logging.getLogger("pipeline.stage1_crawl")
 
@@ -101,7 +105,24 @@ def run_stage1(args: Any, config: Dict[str, Any]) -> int:
         logger.warning(f"Target URL disallowed by robots.txt: {target_url}")
         return 1
 
-    if "dbnaked.com" in domain:
+    if is_scrolller_url(target_url) or "scrolller.com" in domain:
+        user_pages = getattr(args, "pages", None)
+        if user_pages:
+            pages = parse_page_range(user_pages)
+            max_p = max(pages) if pages else 10
+        else:
+            max_p = 25  # fetch all/up to 25 pages by default for scrolller
+
+        candidates.extend(
+            fetch_scrolller_candidates(
+                url=target_url,
+                session=session,
+                max_pages=max_p,
+                timeout=timeout,
+            )
+        )
+
+    elif "dbnaked.com" in domain:
         if is_dbnaked_channel(target_url):
             pages = parse_page_range(pages_arg)
             all_scene_urls = set()
