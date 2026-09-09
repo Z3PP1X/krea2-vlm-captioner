@@ -50,6 +50,12 @@ def parse_args():
         help="Path to folder containing images and .txt caption pairs.",
     )
     parser.add_argument(
+        "--dataset-name",
+        type=str,
+        default=None,
+        help="Name of dataset in AI-Toolkit (e.g. 'restrained_elegance' -> /app/ai-toolkit/datasets/restrained_elegance).",
+    )
+    parser.add_argument(
         "--manifest",
         type=str,
         default=None,
@@ -164,6 +170,25 @@ def main():
     # 1. Discover items to refine
     items: List[Dict[str, Any]] = []
 
+    if args.dataset_name and not args.dataset_dir:
+        candidates = [
+            Path(f"/app/ai-toolkit/datasets/{args.dataset_name}"),
+            PROJECT_ROOT / "data" / "datasets" / args.dataset_name,
+            PROJECT_ROOT / "data" / args.dataset_name,
+            PROJECT_ROOT / args.dataset_name,
+        ]
+        for c in candidates:
+            if c.exists():
+                args.dataset_dir = str(c)
+                break
+        if not args.dataset_dir:
+            args.dataset_dir = f"/app/ai-toolkit/datasets/{args.dataset_name}"
+
+    if not args.trigger:
+        if args.dataset_name == "restrained_elegance" or (args.dataset_dir and "restrained_elegance" in str(args.dataset_dir)):
+            args.trigger = "restrained_elegance"
+            logger.info("Auto-assigned trigger token: 'restrained_elegance'")
+
     if args.dataset_dir:
         d_path = Path(args.dataset_dir).resolve()
         if not d_path.exists():
@@ -199,15 +224,26 @@ def main():
                 })
         logger.info(f"Discovered {len(items)} items from manifest {m_path}")
     else:
-        # Default fallback: check data/processed or data/raw
-        default_dir = PROJECT_ROOT / "data" / "processed"
-        if not default_dir.exists() or not any(default_dir.iterdir()):
-            default_dir = PROJECT_ROOT / "data" / "raw"
-        if default_dir.exists():
-            items = discover_dataset_items(default_dir, force=args.force)
-            logger.info(f"Auto-selected default dataset directory: {default_dir} ({len(items)} items)")
+        # Default fallback: check common dataset locations
+        candidates = [
+            Path("/app/ai-toolkit/datasets/restrained_elegance"),
+            Path("/app/ai-toolkit/datasets/kink_collection"),
+            PROJECT_ROOT / "data" / "processed",
+            PROJECT_ROOT / "data" / "raw",
+        ]
+        found = None
+        for c in candidates:
+            if c.exists() and any(c.iterdir()):
+                found = c
+                break
+        if found:
+            items = discover_dataset_items(found, force=args.force)
+            logger.info(f"Auto-selected dataset directory: {found} ({len(items)} items)")
+            if not args.trigger and "restrained_elegance" in str(found):
+                args.trigger = "restrained_elegance"
+                logger.info("Auto-assigned trigger token: 'restrained_elegance'")
         else:
-            logger.error("Please specify --dataset-dir <path> or --manifest <path>.")
+            logger.error("Please specify --dataset-name <name> or --dataset-dir <path> or --manifest <path>.")
             sys.exit(1)
 
     if not items:
