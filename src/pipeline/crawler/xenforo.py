@@ -49,6 +49,20 @@ def extract_xenforo_candidates(
     soup = BeautifulSoup(html, "html.parser")
     candidates: List[CandidateImage] = []
 
+    # Extract default thread title from H1 or page title
+    thread_title = "Unknown Set"
+    h1 = soup.find(["h1"], class_=re.compile(r"p-title-value|p-title"))
+    if h1 and h1.get_text(strip=True):
+        thread_title = h1.get_text(strip=True)
+    elif soup.title and soup.title.get_text(strip=True):
+        raw_t = soup.title.get_text(strip=True)
+        raw_t = re.sub(r"\s*\|.*$", "", raw_t)
+        raw_t = re.sub(r"\s*[-–]\s*Page\s*\d+.*$", "", raw_t, flags=re.IGNORECASE)
+        if raw_t.strip() and raw_t.strip().lower() not in ["log in", "register"]:
+            thread_title = raw_t.strip()
+
+    ignored_headers = {"log in", "sign up", "register", "menu", "search", "reactions", "quote", "spoiler", "show", "hide"}
+
     # Iterate through individual forum posts
     posts = soup.find_all("article", class_=re.compile(r"message--post|message"))
     if not posts:
@@ -56,16 +70,20 @@ def extract_xenforo_candidates(
 
     for post_idx, post in enumerate(posts, 1):
         # Extract title/tags from spoilers or headers
-        title = "Unknown Set"
+        title = thread_title
         tags = []
 
         header = post.find(["h2", "h3", "b", "strong"])
         if header and header.get_text(strip=True):
-            title = header.get_text(strip=True)[:100]
+            text = header.get_text(strip=True)[:100]
+            if text.lower() not in ignored_headers and len(text) > 3:
+                title = text
 
-        spoiler_title = post.find("span", class_="button-text")
-        if spoiler_title and spoiler_title.get_text(strip=True):
-            title = spoiler_title.get_text(strip=True)[:100]
+        spoiler_btn = post.find("span", class_="button-text")
+        if spoiler_btn and spoiler_btn.get_text(strip=True):
+            text = spoiler_btn.get_text(strip=True)[:100]
+            if text.lower() not in ignored_headers:
+                title = text
 
         # Extract image tags
         img_elements = post.find_all("img")
