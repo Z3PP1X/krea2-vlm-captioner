@@ -24,7 +24,7 @@ downloads/
 # Output files generated during tests
 *.txt
 *.json
-!requirements.txt
+!requirements*.txt
 
 # OS & IDE
 .DS_Store

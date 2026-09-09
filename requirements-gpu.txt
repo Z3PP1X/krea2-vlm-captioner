@@ -1,0 +1,8 @@
+# GPU Dependencies for vLLM and Stage 4 Captioning
+-r requirements.txt
+torch>=2.4.0
+torchvision
+vllm>=0.6.0
+transformers>=4.45.0
+accelerate>=0.30.0
+huggingface_hub
