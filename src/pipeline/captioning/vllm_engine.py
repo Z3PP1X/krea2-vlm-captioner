@@ -70,6 +70,8 @@ class QwenVLEngine:
         """Processes a batch of images through vLLM using Guided Decoding with assistant prefill '{'."""
         self._ensure_model_loaded()
 
+        from vllm import SamplingParams
+
         temp = self.temperature if temperature is None else temperature
         sampling_kwargs: Dict[str, Any] = {
             "temperature": temp,
