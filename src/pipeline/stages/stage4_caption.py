@@ -285,26 +285,26 @@ def run_stage4(args: Any, config: Dict[str, Any]) -> int:
             if refine_mode and existing_caption:
                 user_prompts.append(
                     f"Existing Draft Caption: \"{existing_caption}\"\n"
-                    f"Refinement Task: Audit and elevate this draft caption into an exhaustive Krea 2 visual narrative. "
-                    f"Correct any visual errors or inaccurate terms. The output caption MUST be at least 550 tokens long and up to 1024 tokens "
-                    f"(approx. 380-500+ words in detailed natural English), exhaustively detailing: "
-                    f"(1) Model Position & posture geometry (kneeling, arched spine, limb angles, physical contact points, muscle tension), "
-                    f"(2) Bondage Type (shibari rope, chain restraint, leather bondage, suspension, predicament), "
-                    f"(3) Bondage Equipment & materials (5-8mm hemp/jute rope, welded steel chains, chrome handcuffs, O-rings, carabiners, spreader bars, leather collars), "
-                    f"(4) Bondage Position & anatomical rigging (takate-kote box tie, hishime chest harness, wrist/ankle placement, skin bite indentations), "
-                    f"(5) Studio environment/flooring, (6) Chiaroscuro lighting/specular highlights, and (7) Camera optics/DoF. "
+                    f"Refinement Task: Audit and elevate this draft caption into a concise, dense Krea 2 visual narrative. "
+                    f"Correct any visual errors or inaccurate terms. The output caption MUST be approximately 150 to 220 words (STRICT MAXIMUM 340 TOKENS), "
+                    f"tightly and concisely detailing: "
+                    f"(1) Model Position (posture, spinal curve, limb angles, muscle tension, floor contact points), "
+                    f"(2) Bondage Type (shibari rope, chain restraint, leather bondage, suspension), "
+                    f"(3) Bondage Equipment & materials (5-8mm hemp/jute rope, welded chains, chrome cuffs, O-rings, spreader bars), "
+                    f"(4) Bondage Position & rigging (takate-kote box tie, hishime chest harness, wrist/ankle positioning, skin bite indentations), "
+                    f"(5) Studio flooring/backdrop, (6) Chiaroscuro lighting/highlights, and (7) Camera optics/DoF. "
                     f"Output raw caption text only. Do not output JSON. {context}"
                 )
             else:
                 user_prompts.append(
-                    f"Task: Inspect this image and write an exhaustive Krea 2 visual narrative. "
-                    f"The output caption MUST be at least 550 tokens long and up to 1024 tokens (approx. 380-500+ words in detailed natural English), "
-                    f"exhaustively detailing: "
-                    f"(1) Model Position & posture geometry (kneeling, arched spine, limb angles, physical contact points, muscle tension), "
-                    f"(2) Bondage Type (shibari rope, chain restraint, leather bondage, suspension, predicament), "
-                    f"(3) Bondage Equipment & materials (5-8mm hemp/jute rope, welded steel chains, chrome handcuffs, O-rings, carabiners, spreader bars, leather collars), "
-                    f"(4) Bondage Position & anatomical rigging (takate-kote box tie, hishime chest harness, wrist/ankle placement, skin bite indentations), "
-                    f"(5) Studio environment/flooring, (6) Chiaroscuro lighting/specular highlights, and (7) Camera optics/DoF. "
+                    f"Task: Inspect this image and write a concise, dense Krea 2 visual narrative. "
+                    f"The output caption MUST be approximately 150 to 220 words (STRICT MAXIMUM 340 TOKENS), "
+                    f"tightly and concisely detailing: "
+                    f"(1) Model Position (posture, spinal curve, limb angles, muscle tension, floor contact points), "
+                    f"(2) Bondage Type (shibari rope, chain restraint, leather bondage, suspension), "
+                    f"(3) Bondage Equipment & materials (5-8mm hemp/jute rope, welded chains, chrome cuffs, O-rings, spreader bars), "
+                    f"(4) Bondage Position & rigging (takate-kote box tie, hishime chest harness, wrist/ankle positioning, skin bite indentations), "
+                    f"(5) Studio flooring/backdrop, (6) Chiaroscuro lighting/highlights, and (7) Camera optics/DoF. "
                     f"Output raw caption text only. Do not output JSON. {context}"
                 )
 

@@ -15,11 +15,11 @@ Comma-separated tag soups (`1girl, solo, bdsm, chains, kneeling, black backgroun
 - "Token bleeding" (e.g., rope textures bleeding into human skin or wall surfaces)
 - Plastic, waxy epidermal rendering
 
-### The 550–1024 Token Advantage
-Krea 2 thrives when conditioned on **connected, grammatically complete, natural language paragraphs of at least 550 tokens and up to 1024 tokens (~380–500+ words)**. A comprehensive 550–1024 token narrative provides:
-1. Complete semantic separation of model posture, restraint hardware, anatomical placement, and lighting into dedicated clauses.
-2. Full simultaneous activation of all 12 tapped layers of Qwen3-VL.
-3. Micro-level tactile control over rope weave, chain reflections, skin indentation marks, and optical falloff without token clipping.
+### The 150–340 Token Sweet Spot (Dense & Concise)
+Krea 2 achieves optimal conditioning when descriptions are concise, sensory-dense, and tightly bounded between **150 and 340 tokens (~150–220 words)**. This strict ceiling eliminates rambling, filler phrases, and repetitive adjectives while preserving complete semantic coverage across all 12 Qwen3-VL layers:
+1. Concise semantic separation of model posture, restraint hardware, anatomical placement, and lighting into tight sentences.
+2. Full activation of all 12 tapped layers of Qwen3-VL without diluting attention weights.
+3. Fast inference convergence and crisp prompt following without token bloat.
 
 ---
 
@@ -73,6 +73,6 @@ Every production-grade Krea 2 caption must exhaustively document these core doma
 ---
 
 ## 4. Multi-Tier Caption Strategy for LoRA Training
-1. **`caption_dense` (550–1024 tokens / ~380–500+ words)**: Primary training target (used in 70% of epochs). Teaches full sensory fidelity, rigging geometry, and scene decomposition.
-2. **`caption_mid` (50–90 words)**: Condensed anchor focusing on Subject + Model Position + Bondage Type/Hardware + Setting (used in 20% of epochs).
-3. **`caption_short` (20–35 words)**: Minimalist anchor for high-guidance inference.
+1. **`caption_dense` (150–340 tokens / ~150–220 words)**: Primary training target (used in 70% of epochs). Teaches full sensory fidelity, rigging geometry, and scene decomposition with zero token bloat.
+2. **`caption_mid` (40–70 words)**: Condensed anchor focusing on Subject + Model Position + Bondage Type/Hardware + Setting (used in 20% of epochs).
+3. **`caption_short` (15–25 words)**: Minimalist anchor for high-guidance inference.

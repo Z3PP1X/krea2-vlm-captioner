@@ -45,8 +45,8 @@ stage4_caption:
   max_model_len: 12288                # Expanded context to comfortably fit high-res visual tokens + text prompts
   batch_size: 16
   temperature: 0.75
-  max_tokens: 1024
-  min_caption_tokens: 550
+  max_tokens: 340
+  min_caption_tokens: 150
   thinking_mode: false
   trigger_word: "restrained_elegance"
   caption_mode: "style"               # 'style' (omits style enum in text) or 'subject'

@@ -74,29 +74,30 @@ def build_system_prompt(vocab: Optional[Dict[str, List[str]]] = None, raw_captio
     """Builds the Krea 2 expert visual annotation system prompt embedding Shibari & Bondage skills.
     
     When raw_caption_mode=True (default), instructs the model to output PURE CAPTION TEXT directly,
-    saving all token capacity for the 550-1024 token descriptive narrative with zero token waste on JSON syntax.
+    with a strict maximum of 340 tokens (~150-220 words, 1/3 of the previous budget) to ensure dense,
+    punchy, non-repetitive visual descriptions with zero token waste on JSON syntax.
     JSON structuring is then handled programmatically by Python.
     """
     if raw_caption_mode:
         return (
             "You are an expert visual annotator, director of photography, and synthetic dataset engineer specializing in "
             "the Krea 2 generative foundation model (Qwen3-VL text encoder).\n\n"
-            "Your task is to inspect the provided image and generate an exhaustive, highly descriptive visual narrative.\n\n"
+            "Your task is to inspect the provided image and generate a concise, dense, and highly descriptive visual narrative.\n\n"
             "### STRICT OUTPUT FORMAT:\n"
             "- OUTPUT RAW CAPTION TEXT ONLY. Do NOT output JSON, labels, bullet points, markdown code blocks (```), or conversational preamble ('In this image...', 'This photograph shows...').\n"
             "- Begin directly with the Trigger Token or the Medium declaration ('Photograph of...').\n"
-            "- CRITICAL LENGTH REQUIREMENT: The caption MUST be AT LEAST 550 TOKENS LONG and up to 1024 tokens maximum "
-            "(approximately 380 to 500+ words in fluent, highly detailed natural English prose).\n"
+            "- CRITICAL LENGTH REQUIREMENT: The caption MUST be approximately 150 to 220 words (STRICT MAXIMUM 340 TOKENS). "
+            "Keep the description tight, sensory-dense, and punchy. Do NOT ramble, pad, or repeat adjectives.\n"
             "- Comma-separated Booru tags are STRICTLY FORBIDDEN. Write connected, grammatically complete, descriptive sentences.\n\n"
-            "### MANDATORY DESCRIPTIVE DOMAINS (EXHAUSTIVELY COVER EACH):\n"
-            "1. [Medium & Framing] -> Format, angle, shot distance (e.g. 'Photograph of...', 'Eye-level medium-wide studio photograph capturing...').\n"
-            "2. [Model Position & Anatomical Geometry] -> Explicit body posture (kneeling in seiza, standing upright on tiptoes, arched on all fours, seated, lying prone, suspended/semi-suspended), limb placement and joint angles, spinal curvature, muscle tension, gravitational weight distribution, physical contact points with floor or props, head tilt, facial expression, skin tone, natural epidermal texture.\n"
-            "3. [Bondage Type & Classification] -> Concrete discipline (e.g. Japanese rope bondage / kinbaku / shibari, polished metallic chain restraint, strict immobilizing bondage, aesthetic decorative harness, suspension / partial suspension, heavy leather strap restraint, predicament bondage, sensory/posture restriction).\n"
-            "4. [Bondage Equipment & Material Specifications] -> Exact tactile materials, gauges, and hardware: unbleached twisted Japanese hemp rope (asanawa) or raw oiled jute cordage (5mm-8mm diameter, surface fuzz, multi-ply twist), heavy-gauge welded steel link chains, polished chrome/nickel-plated handcuffs, stainless steel shackles, hinged locking cuffs, welded steel O-rings, forged carabiners, spreader bars, locking buckles, wide leather posture collar, padlocks.\n"
-            "5. [Bondage Position, Rigging Topology & Skin Interaction] -> Exact anatomical routing, attachment points, and knot patterns: hands bound behind back at lumbar spine, box tie (takate-kote / gote) with elbows pulled together, diamond lattice chest harness (hishime) across sternum and breasts, tortoise shell pattern (kikko), thigh/ankle ties, frog tie, collar leash tethered to ceiling hook or chain harness; physical interaction: distinct skin indentation lines where taut cordage or metal bites into thighs/torso, muscle compression, and realistic tension marks.\n"
-            "6. [Environment, Architecture & Backdrop] -> Studio flooring (e.g. glossy reflective black floor with mirror-like reflections, polished concrete, wooden planks, bamboo mat), backdrop walls, negative space, atmospheric dark studio void.\n"
-            "7. [Lighting, Chiaroscuro & Shadow Gradients] -> Directional key light, overhead spotlights, high-contrast chiaroscuro shadows, specular highlights skimming skin contours and reflecting off metallic hardware, rim lighting.\n"
-            "8. [Optics, Camera Perspective & Atmosphere] -> Lens focal length (e.g. 50mm, 85mm), shallow depth of field (e.g. f/2.8), razor-sharp focus on the restraint hardware and skin pore texture, gentle background blur/bokeh."
+            "### MANDATORY DESCRIPTIVE DOMAINS (CONCISELY COVER EACH IN 1-2 SENTENCES):\n"
+            "1. [Medium & Framing] -> Format, angle, shot distance (e.g. 'Photograph of...', 'Eye-level medium studio photograph capturing...').\n"
+            "2. [Model Position & Anatomical Geometry] -> Explicit body posture (kneeling in seiza, standing upright on tiptoes, arched on all fours, seated, lying prone, suspended), limb angles, spinal curve, muscle tension, physical floor contact points, skin texture.\n"
+            "3. [Bondage Type & Classification] -> Concrete discipline (Japanese rope shibari/kinbaku, polished metallic chain restraint, leather strap bondage, suspension, predicament bondage).\n"
+            "4. [Bondage Equipment & Materials] -> Exact tactile materials (5-8mm unbleached hemp/jute rope, welded steel chains, chrome handcuffs, shackles, O-rings, carabiners, spreader bars, posture collar, padlocks).\n"
+            "5. [Bondage Position, Rigging & Skin Interaction] -> Anatomical routing (takate-kote box tie, hishime chest harness, wrist/ankle positioning, stem line, leash tension); skin indentation lines and biting compression marks.\n"
+            "6. [Environment & Backdrop] -> Studio flooring (glossy reflective black floor with mirror reflections, dark studio void).\n"
+            "7. [Lighting & Chiaroscuro] -> Directional spotlights, high-contrast chiaroscuro, specular highlights skimming skin contours and hardware.\n"
+            "8. [Optics & Camera Perspective] -> Focal length (50mm/85mm), shallow depth of field, razor-sharp hardware focus."
         )
 
     # Legacy JSON schema mode
@@ -108,10 +109,10 @@ def build_system_prompt(vocab: Optional[Dict[str, List[str]]] = None, raw_captio
     return (
         "You are an expert visual annotator, director of photography, and synthetic dataset engineer specializing in "
         "the Krea 2 generative foundation model (Qwen3-VL text encoder).\n\n"
-        "Your task is to inspect the provided image and generate an exhaustive, highly descriptive visual caption adhering "
+        "Your task is to inspect the provided image and generate an objective, concise visual caption adhering "
         "strictly to the Krea 2 prompting architecture and specialized shibari/bondage photoshoot guidelines.\n\n"
         "### CRITICAL TOKEN LENGTH REQUIREMENT:\n"
-        "- The 'caption_dense' field MUST be AT LEAST 550 TOKENS LONG and up to 1024 tokens maximum (approx. 380 to 500+ words in detailed natural English).\n"
+        "- The 'caption_dense' field MUST be approximately 150 to 220 words (STRICT MAXIMUM 340 TOKENS).\n"
         "- DO NOT summarize, compress, or use bullet points. Write connected, grammatically complete, descriptive prose.\n"
         "- Comma-separated Booru tags (e.g. '1girl, bdsm, chains') are STRICTLY PROHIBITED.\n\n"
         "### MANDATORY DESCRIPTIVE DOMAINS:\n"

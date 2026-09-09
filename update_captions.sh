@@ -41,8 +41,8 @@ if [ -d "$TARGET" ] || [[ "$TARGET" == *"/"* ]] || [[ "$TARGET" == *"\\"* ]]; th
 fi
 
 TEMPERATURE="0.75"
-MAX_TOKENS="1024"
-MIN_TOKENS="550"
+MAX_TOKENS="340"
+MIN_TOKENS="150"
 PARALLEL_SUB_BATCH="16"
 
 echo "========================================================================"
@@ -51,7 +51,7 @@ echo " Target Target   : ${TARGET} (${DATASET_FLAG})"
 echo " GPU VRAM Target : RTX PRO 6000 (96GB VRAM)"
 echo " Engine          : Google Gemma 4 12B (google/gemma-4-12B-it)"
 echo " Output Mode     : Pure Raw Text (Zero Token Waste, Programmatic JSON)"
-echo " Caption Density : 550 - 1024 Tokens per image (~380 - 500+ words)"
+echo " Caption Density : 150 - 340 Tokens per image (~150 - 220 words)"
 echo " Sampling Temp   : ${TEMPERATURE}"
 echo " Parallel Batch  : ${PARALLEL_SUB_BATCH} images concurrent"
 echo " Taxonomy Focus  : Model Position | Bondage Type | Equipment | Rigging"
