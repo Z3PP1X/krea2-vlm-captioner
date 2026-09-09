@@ -44,6 +44,34 @@ class QwenVLEngine:
 
         try:
             from vllm import LLM
+
+            # Hotfix for Gemma 4 RoPE scaling parameter schema mismatch in vLLM
+            try:
+                import vllm.transformers_utils.config as vllm_cfg
+                _orig_dict = getattr(vllm_cfg, "patch_rope_scaling_dict", None)
+                if _orig_dict is not None:
+                    def _safe_patch_dict(rope_scaling):
+                        if not isinstance(rope_scaling, dict):
+                            return
+                        if "rope_type" not in rope_scaling:
+                            rope_scaling["rope_type"] = rope_scaling.get("type", "default")
+                        try:
+                            _orig_dict(rope_scaling)
+                        except ValueError:
+                            pass
+                    vllm_cfg.patch_rope_scaling_dict = _safe_patch_dict
+
+                _orig_patch = getattr(vllm_cfg, "patch_rope_scaling", None)
+                if _orig_patch is not None:
+                    def _safe_patch(cfg):
+                        try:
+                            _orig_patch(cfg)
+                        except ValueError:
+                            pass
+                    vllm_cfg.patch_rope_scaling = _safe_patch
+            except Exception as patch_e:
+                logger.debug(f"vLLM rope patch ignored: {patch_e}")
+
             logger.info(f"Loading vLLM Offline Engine with {self.model_name} (GPU util: {self.gpu_memory_utilization})...")
             self._llm = LLM(
                 model=self.model_name,
