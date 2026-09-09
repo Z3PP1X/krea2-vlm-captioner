@@ -242,8 +242,14 @@ def crawl_and_download_channel(
 
     def _download_task(cand: CandidateImage) -> Optional[ManifestEntry]:
         try:
+            # Fast check: already in manifest?
+            existing = manifest.get_by_url(cand.source_url)
+            if existing and existing.stages_status.get("stage1_crawl") == "downloaded":
+                return existing
+
             img_r = session.get(cand.source_url, headers=cand.http_headers, timeout=timeout)
             if img_r.status_code != 200:
+                logger.warning(f"Download failed ({img_r.status_code}): {cand.source_url}")
                 return None
 
             img_bytes = img_r.content
@@ -259,10 +265,11 @@ def crawl_and_download_channel(
             filename = f"{image_id}{ext}"
             file_path = raw_dir / filename
 
-            with open(file_path, "wb") as f:
-                f.write(img_bytes)
+            if not file_path.exists():
+                with open(file_path, "wb") as f:
+                    f.write(img_bytes)
 
-            rel_raw_path = str(file_path.relative_to(PROJECT_ROOT)).replace("\\", "/")
+            rel_raw_path = f"data/raw/{filename}"
             return ManifestEntry(
                 image_id=image_id,
                 source="dbnaked",
@@ -287,7 +294,7 @@ def crawl_and_download_channel(
                 },
             )
         except Exception as err:
-            logger.debug(f"Failed downloading {cand.source_url}: {err}")
+            logger.warning(f"Error processing {cand.source_url}: {err}")
             return None
 
     with ThreadPoolExecutor(max_workers=workers) as executor:
@@ -298,7 +305,7 @@ def crawl_and_download_channel(
                 manifest.add_or_update(entry)
                 downloaded_now += 1
                 if downloaded_now % 50 == 0 or downloaded_now == len(selected_candidates):
-                    logger.info(f"[{category}] Downloaded {downloaded_now}/{len(selected_candidates)} images ({downloaded_now / len(selected_candidates) * 100:.1f}%)...")
+                    logger.info(f"[{category}] Processed {downloaded_now}/{len(selected_candidates)} images ({downloaded_now / len(selected_candidates) * 100:.1f}%)...")
 
     manifest.save()
     total_channel_now = existing_count + downloaded_now
@@ -329,9 +336,10 @@ def main():
 
     config = load_config(args.config)
     manifest_path = config.get("general", {}).get("manifest_path", "data/manifest.jsonl")
-    raw_dir = Path(config.get("general", {}).get("raw_dir", "data/raw"))
+    manifest_file = (PROJECT_ROOT / manifest_path).resolve() if not Path(manifest_path).is_absolute() else Path(manifest_path)
+    raw_dir = (PROJECT_ROOT / config.get("general", {}).get("raw_dir", "data/raw")).resolve()
     raw_dir.mkdir(parents=True, exist_ok=True)
-    manifest = Manifest(manifest_path)
+    manifest = Manifest(str(manifest_file))
 
     session = requests.Session()
     session.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"})
