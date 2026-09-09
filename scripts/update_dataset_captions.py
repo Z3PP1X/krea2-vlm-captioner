@@ -250,10 +250,9 @@ def main():
         logger.info("No items require refinement. Use --force to re-refine all items.")
         return
 
-    # 2. Prepare Schema and System Prompt
+    # 2. Prepare System Prompt for Pure Caption Output
     vocab = load_vocabulary()
-    json_schema = get_vllm_json_schema(vocab)
-    system_prompt = build_system_prompt(vocab)
+    system_prompt = build_system_prompt(vocab, raw_caption_mode=True)
 
     # 3. Initialize Engine
     engine = Gemma4HfEngine(
@@ -267,7 +266,7 @@ def main():
     total_items = len(items)
     batch_size = args.batch_size
     total_batches = (total_items + batch_size - 1) // batch_size
-    logger.info(f"\nStarting refinement across {total_batches} batches...")
+    logger.info(f"\nStarting refinement across {total_batches} batches (raw caption text mode, target: >= 400 tokens)...")
 
     refined_count = 0
     failed_count = 0
@@ -297,26 +296,26 @@ def main():
                     f"3. Fully describe: (1) Medium/framing, (2) Subject anatomy/skin texture, (3) Pose mechanics/tension, "
                     f"(4) Exact shibari knots (takate-kote, hishime, kikko) or metallic hardware (chrome handcuffs, O-rings, carabiners), "
                     f"(5) Studio environment/flooring, (6) Chiaroscuro lighting/specular highlights, and (7) Camera optics/DoF.\n"
-                    f"Output strictly conforming to the JSON schema."
+                    f"Output raw caption text only. Do not output JSON."
                 )
             else:
                 prompt_text = (
                     f"Task:\n"
-                    f"Inspect this image and generate an exhaustive 7-layer Krea 2 visual narrative of AT LEAST 400 TOKENS (~280-350+ words).\n"
+                    f"Inspect this image and write an exhaustive 7-layer Krea 2 visual narrative of AT LEAST 400 TOKENS (~280-350+ words).\n"
                     f"Meticulously detail subject anatomy, body tension, exact shibari knots or bondage hardware, tactile textures, "
                     f"studio environment, lighting gradients, and camera optics.\n"
-                    f"Output strictly conforming to the JSON schema."
+                    f"Output raw caption text only. Do not output JSON."
                 )
             user_prompts.append(prompt_text)
 
-        # Generate outputs via Gemma 4 parallel engine
+        # Generate outputs via Gemma 4 parallel engine in raw text mode
         try:
             results = engine.generate_batch(
                 image_paths=image_paths,
                 user_prompts=user_prompts,
                 system_prompt=system_prompt,
-                json_schema=json_schema,
                 temperature=args.temperature,
+                raw_text_mode=True,
             )
         except Exception as exc:
             logger.error(f"Batch {b_idx} generation failed: {exc}")

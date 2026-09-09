@@ -64,7 +64,7 @@ def run_stage4(args: Any, config: Dict[str, Any]) -> int:
     vocab_path = general_cfg.get("vocabulary_path", "config/vocabulary.yaml")
     vocab = load_vocabulary(vocab_path)
     json_schema = get_vllm_json_schema(vocab)
-    system_prompt = build_system_prompt(vocab)
+    system_prompt = build_system_prompt(vocab, raw_caption_mode=True)
 
     raw_model = getattr(args, "model", None) or cap_cfg.get("model_name", "Qwen/Qwen2.5-VL-3B-Instruct")
     model_aliases = {
@@ -286,16 +286,18 @@ def run_stage4(args: Any, config: Dict[str, Any]) -> int:
                 user_prompts.append(
                     f"Existing Draft Caption: \"{existing_caption}\"\n"
                     f"Refinement Task: Audit and elevate this draft caption into an exhaustive 7-layer Krea 2 visual narrative. "
-                    f"Correct any visual errors or inaccurate shibari/hardware terms. The output 'caption_dense' MUST be at least 400 tokens long "
+                    f"Correct any visual errors or inaccurate shibari/hardware terms. The output caption MUST be at least 400 tokens long "
                     f"(approx. 280-350+ words in detailed natural English), thoroughly detailing subject anatomy, body tension, exact knot patterns "
-                    f"or bondage hardware, tactile textures, studio environment, lighting gradients, and camera optics. {context}"
+                    f"or bondage hardware, tactile textures, studio environment, lighting gradients, and camera optics. "
+                    f"Output raw caption text only. Do not output JSON. {context}"
                 )
             else:
                 user_prompts.append(
-                    f"Task: Inspect this image and generate an exhaustive 7-layer Krea 2 visual narrative. "
-                    f"The output 'caption_dense' MUST be at least 400 tokens long (approx. 280-350+ words in detailed natural English), "
+                    f"Task: Inspect this image and write an exhaustive 7-layer Krea 2 visual narrative. "
+                    f"The output caption MUST be at least 400 tokens long (approx. 280-350+ words in detailed natural English), "
                     f"meticulously detailing subject anatomy, body tension, exact shibari knots or bondage hardware, tactile textures, "
-                    f"studio environment, lighting gradients, and camera optics. {context}"
+                    f"studio environment, lighting gradients, and camera optics. "
+                    f"Output raw caption text only. Do not output JSON. {context}"
                 )
 
         # Generate outputs
@@ -305,6 +307,7 @@ def run_stage4(args: Any, config: Dict[str, Any]) -> int:
                 user_prompts=user_prompts,
                 system_prompt=system_prompt,
                 json_schema=json_schema,
+                raw_text_mode=True,
             )
         except Exception as exc:
             logger.warning(f"Batch generation exception: {exc}. Retrying batch items individually...")
@@ -316,6 +319,7 @@ def run_stage4(args: Any, config: Dict[str, Any]) -> int:
                         user_prompts=[u_p],
                         system_prompt=system_prompt,
                         json_schema=json_schema,
+                        raw_text_mode=True,
                     )
                     results.append(single_res[0])
                 except Exception as single_exc:

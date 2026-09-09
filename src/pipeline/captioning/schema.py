@@ -70,11 +70,42 @@ def get_vllm_json_schema(vocab: Dict[str, List[str]]) -> Dict[str, Any]:
     return model_cls.model_json_schema()
 
 
-def build_system_prompt(vocab: Dict[str, List[str]]) -> str:
-    """Builds the Krea 2 expert visual annotation system prompt embedding Shibari & Bondage skills."""
-    styles_str = ", ".join(vocab.get("styles", []))
-    locations_str = ", ".join(vocab.get("locations", []))
-    poses_str = ", ".join(vocab.get("poses", []))
+def build_system_prompt(vocab: Optional[Dict[str, List[str]]] = None, raw_caption_mode: bool = True) -> str:
+    """Builds the Krea 2 expert visual annotation system prompt embedding Shibari & Bondage skills.
+    
+    When raw_caption_mode=True (default), instructs the model to output PURE CAPTION TEXT directly,
+    saving all token capacity for the 400+ token descriptive narrative with zero token waste on JSON syntax.
+    JSON structuring is then handled programmatically by Python.
+    """
+    if raw_caption_mode:
+        return (
+            "You are an expert visual annotator, director of photography, and synthetic dataset engineer specializing in "
+            "the Krea 2 generative foundation model (Qwen3-VL text encoder).\n\n"
+            "Your task is to inspect the provided image and generate an exhaustive, highly descriptive 7-layer visual narrative.\n\n"
+            "### STRICT OUTPUT FORMAT:\n"
+            "- OUTPUT RAW CAPTION TEXT ONLY. Do NOT output JSON, labels, bullet points, markdown code blocks (```), or conversational preamble ('In this image...', 'This photograph shows...').\n"
+            "- Begin directly with the Trigger Token or the Medium declaration ('Photograph of...').\n"
+            "- LENGTH REQUIREMENT: The caption MUST be AT LEAST 400 TOKENS LONG (approximately 280 to 350+ words in fluent, natural English).\n"
+            "- Comma-separated Booru tags are STRICTLY FORBIDDEN. Write connected, grammatically complete, descriptive sentences.\n\n"
+            "### THE 7-LAYER SENSORY NARRATIVE SCHEMA:\n"
+            "1. [Medium & Framing] -> Format, angle, shot distance (e.g. 'Photograph of...', 'Medium-wide studio photograph capturing...').\n"
+            "2. [Subject & Demographics] -> Concrete anatomy: physique, skin tone, natural epidermal texture, hair color/style, posture tension, facial expression.\n"
+            "3. [Pose & Spatial Geometry] -> Body mechanics: limb angles, spinal curvature, contact points with floor or furniture, gravitational weight distribution.\n"
+            "4. [Shibari, Restraints & Hardware Skills] -> Apply specialized terminology:\n"
+            "   - Rope types: unbleached twisted Japanese hemp rope (asanawa), raw oiled jute fiber, cotton rope, rope diameter (5mm-8mm).\n"
+            "   - Knot patterns: takate-kote (box tie), hishime (diamond chest harness), kikko (tortoise shell), karada, honte friction wraps, stem lines, munter hitches.\n"
+            "   - Physical interaction: skin indentation lines where taut ropes bite into thighs or torso, muscle compression.\n"
+            "   - Metallic hardware: polished chrome or stainless steel handcuffs, welded O-rings, forged carabiners, spreader bars, specular reflections, leather collar with nickel buckles.\n"
+            "5. [Environment & Background] -> Studio architecture, flooring (glossy reflective black floor, concrete), walls, negative space, minimal dark void.\n"
+            "6. [Lighting & Colorimetry] -> Key light, directional spotlights, chiaroscuro contrast, sculptural shadow gradients, specular highlights along skin contours.\n"
+            "7. [Optics, Lens & Atmosphere] -> Focal length (e.g. 50mm, 85mm), shallow depth of field, sharp foreground plane, gentle background bokeh."
+        )
+
+    # Legacy JSON schema mode
+    vocab_dict = vocab or {}
+    styles_str = ", ".join(vocab_dict.get("styles", []))
+    locations_str = ", ".join(vocab_dict.get("locations", []))
+    poses_str = ", ".join(vocab_dict.get("poses", []))
 
     return (
         "You are an expert visual annotator, director of photography, and synthetic dataset engineer specializing in "

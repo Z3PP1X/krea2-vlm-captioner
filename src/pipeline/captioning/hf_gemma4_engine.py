@@ -80,11 +80,13 @@ class Gemma4HfEngine:
         user_prompts: List[str],
         augmented_system: str,
         temperature: Optional[float] = None,
+        raw_text_mode: bool = True,
     ) -> List[Optional[Dict[str, Any]]]:
         """Runs true parallel GPU tensor generation on a chunk of images."""
         import torch
 
         conversations = []
+        prompt_suffix = "\nOutput raw caption text only:" if raw_text_mode else "\nOutput raw JSON only:"
         for img_path, u_prompt in zip(image_paths, user_prompts):
             with Image.open(img_path) as pil_img:
                 img_rgb = pil_img.convert("RGB")
@@ -94,7 +96,7 @@ class Gemma4HfEngine:
                     "role": "user",
                     "content": [
                         {"type": "image", "image": img_rgb},
-                        {"type": "text", "text": f"{augmented_system}\n\n{u_prompt}\nOutput raw JSON only:"},
+                        {"type": "text", "text": f"{augmented_system}\n\n{u_prompt}{prompt_suffix}"},
                     ],
                 }
             ])
@@ -126,17 +128,29 @@ class Gemma4HfEngine:
         for i, img_path in enumerate(image_paths):
             try:
                 raw_text = self._processor.decode(outputs[i][input_len:], skip_special_tokens=True).strip()
-                m = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", raw_text, re.DOTALL)
-                if m:
-                    clean_json = m.group(1)
+                if raw_text_mode:
+                    clean_text = raw_text.strip()
+                    clean_text = re.sub(r"^```(?:markdown|text)?\s*", "", clean_text)
+                    clean_text = re.sub(r"\s*```$", "", clean_text).strip()
+                    if clean_text.startswith('"') and clean_text.endswith('"'):
+                        clean_text = clean_text[1:-1].strip()
+                    w_count = len(clean_text.split())
+                    results.append({
+                        "caption_dense": clean_text,
+                        "description": clean_text,
+                        "word_count": w_count,
+                        "approx_tokens": int(w_count * 1.35),
+                    })
                 else:
-                    m2 = re.search(r"(\{.*\})", raw_text, re.DOTALL)
-                    clean_json = m2.group(1) if m2 else raw_text
-
-                parsed = json.loads(clean_json)
-                results.append(parsed)
+                    m = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", raw_text, re.DOTALL)
+                    clean_json = m.group(1) if m else None
+                    if not clean_json:
+                        m2 = re.search(r"(\{.*\})", raw_text, re.DOTALL)
+                        clean_json = m2.group(1) if m2 else raw_text
+                    parsed = json.loads(clean_json)
+                    results.append(parsed)
             except Exception as parse_err:
-                logger.warning(f"JSON parse failed for {img_path.name}: {parse_err}")
+                logger.warning(f"Parse failed for {img_path.name}: {parse_err}")
                 results.append(None)
 
         return results
@@ -147,18 +161,20 @@ class Gemma4HfEngine:
         u_prompt: str,
         augmented_system: str,
         temperature: Optional[float] = None,
+        raw_text_mode: bool = True,
     ) -> Optional[Dict[str, Any]]:
         """Fallback for generating a single image safely."""
         import torch
         with Image.open(img_path) as pil_img:
             img_rgb = pil_img.convert("RGB")
 
+        prompt_suffix = "\nOutput raw caption text only:" if raw_text_mode else "\nOutput raw JSON only:"
         messages = [
             {
                 "role": "user",
                 "content": [
                     {"type": "image", "image": img_rgb},
-                    {"type": "text", "text": f"{augmented_system}\n\n{u_prompt}\nOutput raw JSON only:"},
+                    {"type": "text", "text": f"{augmented_system}\n\n{u_prompt}{prompt_suffix}"},
                 ],
             }
         ]
@@ -186,6 +202,20 @@ class Gemma4HfEngine:
             outputs = self._model.generate(**inputs, **gen_kwargs)
 
         raw_text = self._processor.decode(outputs[0][input_len:], skip_special_tokens=True).strip()
+        if raw_text_mode:
+            clean_text = raw_text.strip()
+            clean_text = re.sub(r"^```(?:markdown|text)?\s*", "", clean_text)
+            clean_text = re.sub(r"\s*```$", "", clean_text).strip()
+            if clean_text.startswith('"') and clean_text.endswith('"'):
+                clean_text = clean_text[1:-1].strip()
+            w_count = len(clean_text.split())
+            return {
+                "caption_dense": clean_text,
+                "description": clean_text,
+                "word_count": w_count,
+                "approx_tokens": int(w_count * 1.35),
+            }
+
         m = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", raw_text, re.DOTALL)
         clean_json = m.group(1) if m else None
         if not clean_json:
@@ -199,23 +229,31 @@ class Gemma4HfEngine:
         image_paths: List[Path],
         user_prompts: List[str],
         system_prompt: str,
-        json_schema: Dict[str, Any],
+        json_schema: Optional[Dict[str, Any]] = None,
         seed: int = 42,
         temperature: Optional[float] = None,
+        raw_text_mode: bool = True,
     ) -> List[Optional[Dict[str, Any]]]:
-        """Generates structured JSON captions using parallel GPU batches with automatic fallback."""
+        """Generates structured captions using parallel GPU batches with automatic fallback.
+        
+        When raw_text_mode=True (default), Gemma outputs pure descriptive text to maximize
+        token capacity for 400+ token descriptions without wasting tokens on JSON syntax.
+        """
         self._ensure_model_loaded()
         import time
 
         results: List[Optional[Dict[str, Any]]] = []
-        schema_json = json.dumps(json_schema, indent=2)
 
-        augmented_system = (
-            f"{system_prompt}\n\n"
-            f"You MUST output ONLY a valid JSON object strictly conforming to this schema:\n"
-            f"{schema_json}\n"
-            f"Do not write explanations, introductions, or markdown codeblocks. Output only the JSON."
-        )
+        if raw_text_mode or not json_schema:
+            augmented_system = system_prompt
+        else:
+            schema_json = json.dumps(json_schema, indent=2)
+            augmented_system = (
+                f"{system_prompt}\n\n"
+                f"You MUST output ONLY a valid JSON object strictly conforming to this schema:\n"
+                f"{schema_json}\n"
+                f"Do not write explanations, introductions, or markdown codeblocks. Output only the JSON."
+            )
 
         total_imgs = len(image_paths)
         chunk_size = max(1, self.parallel_sub_batch_size)
@@ -234,6 +272,7 @@ class Gemma4HfEngine:
                     user_prompts=chunk_prompts,
                     augmented_system=augmented_system,
                     temperature=temperature,
+                    raw_text_mode=raw_text_mode,
                 )
                 elapsed = time.time() - t0
                 per_img = elapsed / max(1, len(chunk_paths))
@@ -250,6 +289,7 @@ class Gemma4HfEngine:
                             u_prompt=u_prompt,
                             augmented_system=augmented_system,
                             temperature=temperature,
+                            raw_text_mode=raw_text_mode,
                         )
                         results.append(single_res)
                         elapsed_seq = time.time() - t_seq
