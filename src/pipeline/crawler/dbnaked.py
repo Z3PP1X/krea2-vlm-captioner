@@ -3,7 +3,7 @@
 import re
 import logging
 from typing import List, Optional, Tuple
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse, parse_qs, urlencode
 import requests
 from bs4 import BeautifulSoup
 
@@ -21,6 +21,20 @@ DBNAKED_HEADERS = {
 def is_dbnaked_channel(url: str) -> bool:
     """Checks if the URL is a channel overview page."""
     return "/channels/" in url or "/studios/" in url or "media=pictures" in url
+
+
+def build_dbnaked_page_url(channel_url: str, page_num: int) -> str:
+    """Constructs a channel page URL with media=pictures and page parameter."""
+    parsed = urlparse(channel_url)
+    params = parse_qs(parsed.query)
+    params["media"] = ["pictures"]
+    params["sort"] = ["latest"]
+    if page_num > 1:
+        params["page"] = [str(page_num)]
+    elif "page" in params:
+        del params["page"]
+    new_query = urlencode(params, doseq=True)
+    return f"{parsed.scheme}://{parsed.netloc}{parsed.path}?{new_query}"
 
 
 def extract_scene_links_from_channel(html: str, base_url: str) -> List[str]:
@@ -60,21 +74,45 @@ def extract_dbnaked_gallery_candidates(
         if t and t not in tags:
             tags.append(t)
 
-    # Image extraction (dbNaked uses lightbox thumbnails linking to or data-full images)
-    img_elements = soup.find_all("img")
     seen_urls = set()
 
+    # 1. High-res links (<a> tags linking to /t1600x1600/ or full images)
+    for a in soup.find_all("a", href=True):
+        href = a["href"].strip()
+        if "/t1600x1600/" in href or (href.endswith(".jpg") and "/scene/" in href):
+            if href.startswith("//"):
+                href = f"https:{href}"
+            elif not href.startswith("http"):
+                href = urljoin(url, href)
+            if href not in seen_urls:
+                seen_urls.add(href)
+                candidates.append(
+                    CandidateImage(
+                        source="dbnaked",
+                        source_url=href,
+                        page_url=url,
+                        context_title=title,
+                        context_tags=tags,
+                        http_headers=DBNAKED_HEADERS,
+                    )
+                )
+
+    # 2. Image elements with fallback upscaling replacement
+    img_elements = soup.find_all("img")
     for img in img_elements:
-        src = img.get("data-src") or img.get("src") or ""
+        src = (img.get("data-src") or img.get("src") or "").strip()
         if not src or "avatar" in src or "banner" in src:
             continue
 
-        # Convert thumbnail url to high-res if applicable (e.g. /thumbs/ -> /full/)
-        if "//i.dbnaked.com/" in src:
-            # Protocol-relative url fix
+        if "//i.dbnaked.com/" in src or "/scene/" in src:
             if src.startswith("//"):
                 src = f"https:{src}"
-            high_res_url = src.replace("/thumbs/", "/").replace("/small/", "/")
+            high_res_url = (
+                src.replace("/thumbs/", "/")
+                .replace("/small/", "/")
+                .replace("/t300x300/", "/t1600x1600/")
+                .replace("/t800x800/", "/t1600x1600/")
+            )
             if high_res_url not in seen_urls:
                 seen_urls.add(high_res_url)
                 candidates.append(

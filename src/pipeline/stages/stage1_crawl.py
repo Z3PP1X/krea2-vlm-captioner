@@ -29,6 +29,7 @@ from pipeline.crawler.xenforo import (
 )
 from pipeline.crawler.dbnaked import (
     is_dbnaked_channel,
+    build_dbnaked_page_url,
     extract_scene_links_from_channel,
     extract_dbnaked_gallery_candidates,
     DBNAKED_HEADERS,
@@ -101,28 +102,42 @@ def run_stage1(args: Any, config: Dict[str, Any]) -> int:
         return 1
 
     if "dbnaked.com" in domain:
-        limiter.wait(target_url)
-        resp = session.get(target_url, headers=DBNAKED_HEADERS, timeout=timeout)
-        if resp.status_code != 200:
-            logger.error(f"Failed to fetch {target_url}: HTTP {resp.status_code}")
-            return 1
-
-        # TDM check on channel page
-        is_reserved, reason = compliance.check_tdm_reservation(resp.headers, resp.text)
-        if is_reserved:
-            logger.warning(f"Crawling halted due to TDM reservation: {reason}")
-            return 1
-
         if is_dbnaked_channel(target_url):
-            scene_urls = extract_scene_links_from_channel(resp.text, target_url)
-            logger.info(f"Found {len(scene_urls)} scenes in channel.")
-            for s_url in scene_urls[:10]:  # batch of scenes
+            pages = parse_page_range(pages_arg)
+            all_scene_urls = set()
+
+            for p in pages:
+                p_url = build_dbnaked_page_url(target_url, p)
+                limiter.wait(p_url)
+                logger.info(f"Fetching dbNaked channel page {p}: {p_url}")
+                resp = session.get(p_url, headers=DBNAKED_HEADERS, timeout=timeout)
+                if resp.status_code != 200:
+                    logger.warning(f"Failed to fetch {p_url}: HTTP {resp.status_code}")
+                    continue
+
+                is_reserved, reason = compliance.check_tdm_reservation(resp.headers, resp.text)
+                if is_reserved:
+                    logger.warning(f"Crawling halted on {p_url} due to TDM reservation: {reason}")
+                    continue
+
+                scenes = extract_scene_links_from_channel(resp.text, p_url)
+                logger.info(f"Found {len(scenes)} scenes on page {p}.")
+                all_scene_urls.update(scenes)
+
+            logger.info(f"Discovered {len(all_scene_urls)} total unique scenes in channel across pages {pages_arg}.")
+            for s_url in sorted(list(all_scene_urls)):
                 limiter.wait(s_url)
                 s_resp = session.get(s_url, headers=DBNAKED_HEADERS, timeout=timeout)
                 if s_resp.status_code == 200:
                     candidates.extend(extract_dbnaked_gallery_candidates(s_url, s_resp.text))
         else:
-            candidates.extend(extract_dbnaked_gallery_candidates(target_url, resp.text))
+            limiter.wait(target_url)
+            resp = session.get(target_url, headers=DBNAKED_HEADERS, timeout=timeout)
+            if resp.status_code == 200:
+                candidates.extend(extract_dbnaked_gallery_candidates(target_url, resp.text))
+            else:
+                logger.error(f"Failed to fetch {target_url}: HTTP {resp.status_code}")
+                return 1
 
     else:
         # XenForo or generic forum
