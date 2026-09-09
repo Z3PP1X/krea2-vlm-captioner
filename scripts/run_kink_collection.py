@@ -42,10 +42,6 @@ from pipeline.crawler.dbnaked import (
     build_dbnaked_page_url,
 )
 from pipeline.logging_utils import setup_logging
-from pipeline.stages.stage2_qc import run_stage2
-from pipeline.stages.stage3_downscale import run_stage3
-from pipeline.stages.stage4_caption import run_stage4
-from pipeline.stages.stage5_export import run_stage5
 from pipeline.cli import load_config, print_status_table
 
 logger = logging.getLogger("pipeline.kink_orchestrator")
@@ -397,6 +393,7 @@ def main():
         config["stage2_qc"]["laplacian_variance_min"] = 15.0
         config["stage2_qc"]["detect_watermarks"] = False
         config["stage2_qc"]["detect_text"] = False
+        from pipeline.stages.stage2_qc import run_stage2
         run_stage2(args_qc, config)
     else:
         logger.info("Skipping Stage 2 (--skip-qc set).")
@@ -410,6 +407,7 @@ def main():
             max_workers=args.workers,
             max_dim=2048,
         )
+        from pipeline.stages.stage3_downscale import run_stage3
         run_stage3(args_downscale, config)
     else:
         logger.info("Skipping Stage 3 (--skip-downscale set).")
@@ -435,6 +433,7 @@ def main():
         config.setdefault("stage4_caption", {})
         config["stage4_caption"]["vllm_gpu_memory_utilization"] = 0.90
         config["stage4_caption"]["max_model_len"] = 8192
+        from pipeline.stages.stage4_caption import run_stage4
         run_stage4(args_caption, config)
     else:
         logger.info("Skipping Stage 4 (--skip-caption set).")
@@ -448,6 +447,7 @@ def main():
             dataset_name=args.dataset_name,
             ai_toolkit_dir="/app/ai-toolkit",
         )
+        from pipeline.stages.stage5_export import run_stage5
         run_stage5(args_export, config)
     else:
         logger.info("Skipping Stage 5 (--skip-export set).")

@@ -14,8 +14,8 @@ if [ -f ".venv/bin/activate" ]; then
     source .venv/bin/activate
 fi
 
-# 2. Optimize environment & ensure transformers supports Gemma 4 AutoModelForMultimodalLM
-pip install -U "transformers>=4.49.0" accelerate -q 2>/dev/null || true
+# 2. Optimize environment & ensure dependencies
+pip install -r requirements.txt -U "transformers>=4.49.0" accelerate imagehash beautifulsoup4 -q 2>/dev/null || true
 export VLLM_USE_FLASHINFER_SAMPLER=0
 export VLLM_USE_V1=0
 export TOKENIZERS_PARALLELISM=false
