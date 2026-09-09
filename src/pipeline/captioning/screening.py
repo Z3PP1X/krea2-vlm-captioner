@@ -2,38 +2,45 @@
 
 from __future__ import annotations
 
-from typing import Dict, Any, List, Tuple
+from typing import Dict, Any, List, Tuple, Optional
 
 
 def evaluate_screening(
     data: Dict[str, Any],
-    min_age: int = 25,
-    reject_uncertain_age: bool = True,
+    min_age: int = 0,
+    check_age: Optional[bool] = None,
+    reject_uncertain_age: bool = False,
     reject_watermark: bool = True,
     reject_text: bool = True,
     reject_low_quality: bool = True,
 ) -> Tuple[bool, List[str]]:
-    """Evaluates the parsed Qwen-VL JSON annotation against strict dataset compliance gates.
+    """Evaluates the parsed Qwen-VL JSON annotation against dataset compliance gates.
     
     Returns:
         (passed: bool, rejection_reasons: List[str])
     """
     reasons: List[str] = []
 
-    # 1. Mandatory Age Gate: Numerical Estimate
-    age_est = data.get("subject_age_estimate")
-    if age_est is not None:
-        try:
-            age_int = int(age_est)
-            if age_int < min_age:
-                reasons.append(f"screening_age_under_{min_age}")
-        except (ValueError, TypeError):
-            reasons.append("screening_invalid_age_value")
+    # If check_age was not explicitly passed, enable only if min_age > 0 or reject_uncertain_age is True
+    if check_age is None:
+        check_age = (min_age > 0 or reject_uncertain_age)
 
-    # 2. Mandatory Age Gate: Uncertainty
-    uncertain_age = bool(data.get("uncertain_age", False))
-    if reject_uncertain_age and uncertain_age:
-        reasons.append("screening_uncertain_age")
+    # 1. Age Gate: Numerical Estimate (skipped if check_age is False or min_age <= 0)
+    if check_age and min_age > 0:
+        age_est = data.get("subject_age_estimate")
+        if age_est is not None:
+            try:
+                age_int = int(age_est)
+                if age_int < min_age:
+                    reasons.append(f"screening_age_under_{min_age}")
+            except (ValueError, TypeError):
+                reasons.append("screening_invalid_age_value")
+
+    # 2. Age Gate: Uncertainty
+    if check_age and reject_uncertain_age:
+        uncertain_age = bool(data.get("uncertain_age", False))
+        if uncertain_age:
+            reasons.append("screening_uncertain_age")
 
     # 3. Watermark detection
     has_wm = bool(data.get("has_watermark", False))

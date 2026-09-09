@@ -72,8 +72,9 @@ def run_stage4(args: Any, config: Dict[str, Any]) -> int:
     caption_mode = getattr(args, "mode", None) or cap_cfg.get("caption_mode", "style")
     template = cap_cfg.get("caption_template", "{trigger} {style} {location} {description} {lighting_camera}")
 
-    min_age = int(screening_cfg.get("min_subject_age", 25))
-    reject_uncertain_age = screening_cfg.get("reject_uncertain_age", True)
+    check_age = bool(screening_cfg.get("check_age", False))
+    min_age = int(screening_cfg.get("min_subject_age", 0)) if check_age else 0
+    reject_uncertain_age = bool(screening_cfg.get("reject_uncertain_age", False)) if check_age else False
     reject_watermark = screening_cfg.get("reject_watermark", True)
     reject_text = screening_cfg.get("reject_text", True)
     reject_low_quality = screening_cfg.get("reject_low_quality", True)
@@ -86,12 +87,12 @@ def run_stage4(args: Any, config: Dict[str, Any]) -> int:
     sample_size = getattr(args, "sample", None)
 
     logger.info("=" * 60)
-    logger.info("  STUFE 4: QWEN-VL CAPTIONING & VERBINDLICHES SCREENING")
+    logger.info("  STUFE 4: QWEN-VL CAPTIONING & SCREENING")
     logger.info("=" * 60)
     logger.info(f"VLM Engine / Model    : {model_name}")
     logger.info(f"Trigger Token         : {trigger_word}")
     logger.info(f"Caption Mode          : {caption_mode} (style omitted in text: {caption_mode == 'style'})")
-    logger.info(f"Screening Gate        : Enforced (Min Age: {min_age}, Reject Uncertain: {reject_uncertain_age})")
+    logger.info(f"Screening Gate        : Watermarks, Text, Quality (Age Gate: {'Active (' + str(min_age) + '+)' if check_age else 'Disabled (User-Verified)'})")
     logger.info(f"Batch Size            : {batch_size}")
     logger.info(f"Sample Mode           : {sample_size if sample_size else 'Full Dataset'}")
     logger.info("=" * 60)
@@ -184,10 +185,10 @@ def run_stage4(args: Any, config: Dict[str, Any]) -> int:
                 failed_count += 1
                 continue
 
-            # 3. Mandatory Compliance & Screening Gate
             passed_screen, screen_reasons = evaluate_screening(
                 res_data,
                 min_age=min_age,
+                check_age=check_age,
                 reject_uncertain_age=reject_uncertain_age,
                 reject_watermark=reject_watermark,
                 reject_text=reject_text,

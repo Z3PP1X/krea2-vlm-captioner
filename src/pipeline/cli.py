@@ -125,6 +125,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     # Stage 2: QC
     qc_parser = subparsers.add_parser("qc", help="Stufe 2: Quality control, sRGB, EXIF strip, and pHash deduplication")
+    qc_parser.add_argument("-w", "--max-workers", type=int, default=None, help="Concurrent CPU QC workers (e.g. 8, 16)")
 
     # Stage 3: Downscale
     downscale_parser = subparsers.add_parser("downscale", help="Stufe 3: Downscale to max 2048px (multiples of 16)")

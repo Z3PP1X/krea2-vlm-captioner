@@ -65,3 +65,16 @@ def test_screening_valid_compliant_item():
     passed, reasons = evaluate_screening(data_ok, min_age=25)
     assert passed
     assert len(reasons) == 0
+
+
+def test_screening_age_check_disabled():
+    data_young = {
+        "subject_age_estimate": 18,
+        "uncertain_age": True,
+        "has_watermark": False,
+        "has_text": False,
+        "quality": "high",
+    }
+    passed, reasons = evaluate_screening(data_young, check_age=False)
+    assert passed
+    assert len(reasons) == 0

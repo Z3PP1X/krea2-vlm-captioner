@@ -5,8 +5,9 @@ from __future__ import annotations
 import os
 import logging
 from pathlib import Path
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Tuple
 from PIL import Image
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from pipeline.manifest import Manifest, ManifestEntry
 from pipeline.qc.filters import (
@@ -37,9 +38,12 @@ def run_stage2(args: Any, config: Dict[str, Any]) -> int:
     strip_exif = qc_cfg.get("strip_exif", True)
     convert_srgb = qc_cfg.get("convert_srgb", True)
 
+    workers = getattr(args, "max_workers", None) or os.cpu_count() or 8
+
     logger.info("=" * 60)
     logger.info("  STUFE 2: QUALITÄTSKONTROLLE & DEDUPLIZIERUNG")
     logger.info("=" * 60)
+    logger.info(f"Workers               : {workers}")
     logger.info(f"Min Edge Length       : {min_edge} px")
     logger.info(f"Laplacian Var Min     : {laplacian_min}")
     logger.info(f"pHash Hamming Thresh  : <= {phash_threshold}")
@@ -63,11 +67,11 @@ def run_stage2(args: Any, config: Dict[str, Any]) -> int:
     rejection_counts: Dict[str, int] = {}
     valid_qc_items: List[Dict[str, Any]] = []
 
-    for idx, entry in enumerate(eligible_entries, 1):
+    def process_single_qc(entry: ManifestEntry) -> Tuple[str, Any, Optional[ManifestEntry]]:
         raw_path = entry.get_raw_file()
         if not raw_path or not raw_path.exists():
             entry.update_stage("stage2_qc", "failed", reasons=["missing_raw_file"])
-            continue
+            return ("failed", ["missing_raw_file"], entry)
 
         if "missing_raw_file" in entry.rejection_reasons:
             entry.rejection_reasons.remove("missing_raw_file")
@@ -113,21 +117,47 @@ def run_stage2(args: Any, config: Dict[str, Any]) -> int:
 
                 if reasons:
                     entry.update_stage("stage2_qc", "rejected", reasons=reasons)
-                    for r in reasons:
-                        rejection_counts[r] = rejection_counts.get(r, 0) + 1
-                    logger.debug(f"[QC REJECT] {raw_path.name}: {reasons}")
+                    return ("rejected", reasons, entry)
                 else:
-                    # Item passed initial QC; eligible for pHash deduplication
-                    valid_qc_items.append({
+                    item_dict = {
                         "image_id": entry.image_id,
                         "phash": ph,
                         "score": entry.megapixels * (lap_var / 100.0),
                         "entry": entry,
-                    })
+                    }
+                    return ("valid", item_dict, entry)
 
         except Exception as exc:
             logger.error(f"Error processing QC for {raw_path}: {exc}")
             entry.update_stage("stage2_qc", "failed", reasons=[f"qc_exception_{type(exc).__name__}"])
+            return ("failed", [f"qc_exception_{type(exc).__name__}"], entry)
+
+    if workers <= 1:
+        for idx, entry in enumerate(eligible_entries, 1):
+            status, data, _ = process_single_qc(entry)
+            if status == "rejected":
+                for r in data:
+                    rejection_counts[r] = rejection_counts.get(r, 0) + 1
+            elif status == "valid":
+                valid_qc_items.append(data)
+    else:
+        logger.info(f"Analyzing {len(eligible_entries)} images with {workers} parallel CPU workers...")
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            future_to_entry = {executor.submit(process_single_qc, entry): entry for entry in eligible_entries}
+            done_count = 0
+            for future in as_completed(future_to_entry):
+                done_count += 1
+                try:
+                    status, data, _ = future.result()
+                    if status == "rejected":
+                        for r in data:
+                            rejection_counts[r] = rejection_counts.get(r, 0) + 1
+                    elif status == "valid":
+                        valid_qc_items.append(data)
+                    if done_count % 100 == 0 or done_count == len(eligible_entries):
+                        logger.info(f"[{done_count}/{len(eligible_entries)}] QC images processed ({len(valid_qc_items)} valid so far)...")
+                except Exception as exc:
+                    logger.error(f"Worker exception in QC: {exc}")
 
     # 6. pHash Deduplication Clustering
     logger.info(f"Clustering {len(valid_qc_items)} items for pHash deduplication...")
