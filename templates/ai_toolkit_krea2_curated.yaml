@@ -1,0 +1,40 @@
+---
+job: extension
+config:
+  name: "krea2_style_lora_curated_2k"
+  process:
+    - type: 'sd_trainer'
+      training_folder: "output/krea2_style_lora_curated_2k"
+      device: "cuda:0"
+      trigger_word: "restrained_elegance"
+      network:
+        type: "lora"
+        linear: 128
+        linear_alpha: 128
+      save:
+        dtype: "bfloat16"
+        save_every: 500
+        max_step_saves_to_keep: 4
+      datasets:
+        - folder_path: "data/export/curated_subset"
+          caption_ext: "txt"
+          default_caption: "restrained_elegance"
+          cache_latents_to_disk: true
+          cache_text_encoder_to_disk: true
+      train:
+        batch_size: 4
+        steps: 2000
+        gradient_accumulation_steps: 1
+        train_unet: true
+        train_text_encoder: false
+        train_norm: true
+        gradient_checkpointing: true
+        noise_scheduler: "flowmatch"
+        optimizer: "adamw8bit"
+        lr: 5.0e-5
+        linear_timesteps: true
+        dtype: "bfloat16"
+      model:
+        name_or_path: "krea/krea2-raw"
+        is_krea2: true
+        quantize_base: "fp8"

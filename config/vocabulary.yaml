@@ -1,0 +1,44 @@
+# Initial Vocabulary Schema for Krea 2 Annotation & Screening
+# Derived from crawler tags and high-fashion bondage/aesthetic themes
+
+version: "1.0"
+
+styles:
+  - "restrained_elegance"
+  - "cinematic_noir"
+  - "fine_art_erotica"
+  - "editorial_fashion"
+  - "baroque_sensual"
+  - "moody_monochrome"
+  - "clinical_minimalism"
+  - "other"
+
+locations:
+  - "studio_void"
+  - "minimalist_loft"
+  - "concrete_dungeon"
+  - "velvet_boudoir"
+  - "industrial_warehouse"
+  - "tiled_chamber"
+  - "rustic_barn"
+  - "outdoor_nature"
+  - "other"
+
+poses:
+  - "shibori_rope"
+  - "chain_suspension"
+  - "wrist_cuffs_standing"
+  - "floor_seated"
+  - "arched_back_kneeling"
+  - "hogtie"
+  - "cross_restraint"
+  - "wooden_pillory"
+  - "chair_bound"
+  - "standing_wall_tie"
+  - "reclined_restraint"
+  - "other"
+
+quality_ratings:
+  - "low"
+  - "medium"
+  - "high"

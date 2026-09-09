@@ -1,0 +1,42 @@
+---
+job: extension
+config:
+  name: "krea2_char_lora_stacked"
+  process:
+    - type: 'sd_trainer'
+      training_folder: "output/krea2_char_lora_stacked"
+      device: "cuda:0"
+      trigger_word: "marlene_character"
+      network:
+        type: "lora"
+        linear: 32
+        linear_alpha: 32
+      save:
+        dtype: "bfloat16"
+        save_every: 250
+        max_step_saves_to_keep: 4
+      datasets:
+        - folder_path: "data/characters/marlene"
+          caption_ext: "txt"
+          default_caption: "marlene_character"
+          cache_latents_to_disk: true
+          cache_text_encoder_to_disk: true
+      train:
+        batch_size: 4
+        steps: 1200
+        gradient_accumulation_steps: 1
+        train_unet: true
+        train_text_encoder: false
+        gradient_checkpointing: true
+        noise_scheduler: "flowmatch"
+        optimizer: "adamw8bit"
+        lr: 1.0e-4
+        dtype: "bfloat16"
+      model:
+        name_or_path: "krea/krea2-raw"
+        is_krea2: true
+        quantize_base: "fp8"
+        # Injected frozen style LoRA
+        frozen_lora:
+          path: "output/krea2_style_lora_raw/krea2_style_lora_raw.safetensors"
+          scale: 1.0

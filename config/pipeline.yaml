@@ -1,0 +1,89 @@
+# Krea 2 LoRA Data Pipeline Configuration
+version: "1.0"
+
+general:
+  manifest_path: "data/manifest.jsonl"
+  raw_dir: "data/raw"
+  processed_dir: "data/processed"
+  export_dir: "data/export"
+  reports_dir: "data/reports"
+  vocabulary_path: "config/vocabulary.yaml"
+  log_level: "INFO"
+  structured_logging: true
+
+stage1_crawl:
+  min_resolution_mp: 0.7              # 0.7 Megapixels pre-download threshold
+  respect_robots_txt: true            # Follow robots.txt directives
+  filter_tdm_opt_out: true            # § 44b UrhG opt-out exclusion
+  default_rate_limit_delay: 1.0       # Polite seconds between requests per domain
+  max_workers: 4
+  request_timeout: 25
+  user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+
+stage2_qc:
+  min_edge_px: 1024                   # Minimum width and height for actual image file
+  convert_srgb: true                  # Normalize color profile to sRGB
+  strip_exif: true                    # Remove metadata / privacy leaks
+  phash_hamming_threshold: 6          # Hamming distance <= 6 is considered duplicate cluster
+  enable_embedding_dedup: false       # Optional DINOv2 / CLIP embedding deduplication
+  embedding_cosine_threshold: 0.95
+  laplacian_variance_min: 100.0       # Sharpness threshold (below is rejected as blurry)
+  detect_watermarks: true             # Flag visible watermark overlays
+  detect_text: true                   # Flag text overlays
+
+stage3_downscale:
+  max_long_edge: 2048                 # Maximum long edge size in pixels
+  multiple_of: 16                     # Edge lengths rounded to multiples of 16 (for DiT/VAE)
+  format: "jpeg"                      # Output format: jpeg or png
+  jpeg_quality: 95
+  resampling: "lanczos"
+
+stage4_caption:
+  backend: "vllm_offline"             # 'vllm_offline' (native GPU batching) or 'openai_compat'
+  model_name: "Qwen/Qwen2.5-VL-7B-Instruct"  # Target VLM (or Qwen3-VL-8B)
+  vllm_gpu_memory_utilization: 0.85
+  max_model_len: 4096
+  batch_size: 16
+  temperature: 0.2
+  max_tokens: 250
+  thinking_mode: false
+  trigger_word: "restrained_elegance"
+  caption_mode: "style"               # 'style' (omits style enum in text) or 'subject'
+  caption_template: "{trigger} {style} {location} {description} {lighting_camera}"
+  
+  screening:
+    enforce: true                     # Mandatory gate: non-negotiable
+    min_subject_age: 25               # Strictly reject if estimated age < 25
+    reject_uncertain_age: true        # Reject if uncertain_age is true
+    reject_watermark: true            # Reject if has_watermark is true
+    reject_text: true                 # Reject if has_text is true
+    reject_low_quality: true          # Reject if quality is 'low'
+
+  retry:
+    max_retries: 2
+    temp_step: 0.1
+    min_description_chars: 25
+    evasion_patterns:
+      - "(?i)i cannot assist"
+      - "(?i)as an ai"
+      - "(?i)in this image"
+      - "(?i)here is a description"
+      - "(?i)i'm sorry"
+
+stage5_export:
+  target_framework: "ai_toolkit"      # Primary export format: ai_toolkit (or musubi_tuner)
+  max_balance_factor: 4.0             # Maximum repeat multiplier for rare subconcepts
+  max_person_dominance_ratio: 0.35    # Warning threshold if a single subject dominates
+  aspect_ratio_bucketing: true
+
+stage6_training:
+  base_model: "krea/krea2-raw"
+  lora_rank: 128
+  lora_alpha: 128
+  learning_rate: 5.0e-5
+  batch_size: 4
+  epochs: 1
+  save_every_n_steps: 1000
+  fp8_base: true
+  gradient_checkpointing: true
+  train_norm: true                    # Train RMSNorm and modulation tensors

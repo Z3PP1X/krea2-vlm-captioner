@@ -1,170 +1,212 @@
-# Krea 2 VLM Image Captioner & Crawler 🚀
+# Krea 2 LoRA Data Pipeline & Tooling 🚀
 
-An end-to-end pipeline that crawls image sets from XenForo threads and dbNaked galleries/channels, groups them into set folders with `genres.txt` metadata, and batch-captions every image using a Vision-Language Model (Gemma, PaliGemma, Qwen-VL) running on RunPod.
+A production-grade, modular, idempotent, and resumable end-to-end data pipeline and training tooling tailored specifically for training LoRAs on the **Krea 2 (K2)** generative foundation model (single-stream MMDiT conditioned via Qwen3-VL text encoder).
 
-Tailored specifically for the **Krea 2 (K2)** generative foundation model, utilizing its **Qwen3-VL text encoder** and **7-layer natural language narrative prompting system**.
-
----
-
-## 🌟 Key Features
-
-1. **Multi-Site Image Crawler (`crawler.py`)**:
-   - **XenForo Native Support** (`xxx-files.org`, etc.): Automatically downloads original-sized image sets into separate folders and writes a `genres.txt` containing forum tags and metadata for each set.
-   - **dbNaked Native Support** (`dbnaked.com`): Automatically scrapes channels, galleries, and direct scenes, downloads full 1600x1600 resolution images into scene folders, and generates `genres.txt` containing categories, tags, and performer models.
-2. **Automated `genres.txt` Context Injection**: When captioning an image, the captioner automatically detects `genres.txt` in that set directory and feeds the set title and tags (`Set Context & Tags: Shibari, Rope Bondage, Corset...`) into the VLM prompt. This eliminates hallucinations and grounds materials, wardrobe, and actions.
-3. **Trigger Word Prepending**: Guarantees your custom trigger token (e.g., `restrained_elegance`, `shibori`) is placed as token 0 before `Photograph of...` for optimal Krea 2 LoRA attention.
-4. **Clean Plain Text Output**: Extracts the dense 7-layer narrative caption directly into `<image>.txt` alongside each image—ready for immediate LoRA training in Kohya, AI-Toolkit, or OneTrainer.
-5. **Unified 1-Command Pipeline**: Run the crawler and immediately auto-tag all crawled sets with a single CLI command (`crawl_and_tag.py`).
+Engineered for modern high-VRAM hardware (**NVIDIA L40S 48GB** and **RTX 5090 32GB**) with primary integration for [ostris/ai-toolkit](https://github.com/ostris/ai-toolkit) and companion support for `musubi-tuner`.
 
 ---
 
-## 📁 Repository Structure
+## 📑 Table of Contents
+
+- [Architectural Overview](#-architectural-overview)
+- [8-Stage Pipeline Design](#-8-stage-pipeline-design)
+- [Manifest & State Architecture](#-manifest--state-architecture)
+- [Quick Start & Installation](#-quick-start--installation)
+- [CLI Reference](#-cli-reference)
+- [Training Runbook & Tooling](#-training-runbook--tooling)
+- [Documentation Index](#-documentation-index)
+- [Testing & Verification](#-testing--verification)
+
+---
+
+## 🏛 Architectural Overview
 
 ```
-krea2-vlm-captioner/
-├── crawl_and_tag.py          # Unified end-to-end pipeline (Auto-detects XenForo or dbNaked)
-├── dbnaked_crawler.py        # dbNaked high-res (1600x1600) channel & gallery crawler
-├── crawler.py                # XenForo forum thread image crawler
-├── caption_images.py         # Krea 2 VLM Batch Captioner (reads images + genres.txt -> .txt)
-├── setup_runpod.sh           # 1-click RunPod setup script (Ollama + model pull)
-├── vllm_server_runpod.sh     # vLLM continuous batching startup script
-├── requirements.txt          # Python dependencies
-├── .gitignore                # Excludes raw images, venvs, and temp files
-└── README.md                 # Documentation & quick start guide
+[Sites / Sources]
+       │ (HTTP Range Sniffer > 0.7 MP)
+       ▼
+[Stufe 1: Crawl & Pre-Filter] ────► data/raw/
+       │
+       ▼
+[Stufe 2: QC & Deduplication] ────► sRGB, EXIF Strip, Laplacian Sharpness, pHash Deduplication
+       │
+       ▼
+[Stufe 3: DiT Downscale]      ────► Max 2048px, Multiples of 16 (data/processed/)
+       │
+       ▼
+[Stufe 4: Qwen-VL Inference]  ────► vLLM Offline Batching, Guided JSON, Mandatory Screening Gate
+       │
+       ▼
+[Stufe 5: Balance & Export]   ────► Dynamic Repeats, Distribution Report, AI-Toolkit / Musubi Configs
+       │
+       ▼
+[Stufen 6-8: Train & Validate]───► Krea 2 RAW Training, Validation Grids, Sequential Character Stack
 ```
 
 ---
 
-## ⚡ Quick Start on RunPod
+## 🔄 8-Stage Pipeline Design
 
-### 1. Setup on RunPod
-Inside your RunPod terminal (e.g. `/workspace`):
+### 1. Stufe 1 – Crawling mit Vorfilter
+- **HTTP Range Sniffer**: Reads image header bytes before download; skips any image under 0.7 MP (~1024x700) with zero bandwidth waste.
+- **Compliance & Rate Limiting**: Honors `robots.txt`, detects `§ 44b UrhG` (EU TDM reservation) opt-outs, and enforces domain-level rate limiting with exponential backoff.
+- **Extractors**: Native XenForo forum thread extractor and dbNaked high-res scene extractor.
+
+### 2. Stufe 2 – Quality Control & Deduplication
+- **Sanitization**: Strict sRGB color profile normalization and lossless EXIF metadata stripping.
+- **Sharpness Gate**: Laplacian variance metric (threshold $\ge 100$) rejects blurry and low-detail frames.
+- **Watermark & Noise**: Edge-band luminance variance detection flags embedded site watermarks and banners.
+- **Perceptual Deduplication**: 64-bit DCT pHash clustering with Hamming distance $\le 6$ groups near-duplicate frames into equivalence classes, retaining only the sharpest instance.
+
+### 3. Stufe 3 – Downscaling & Multiples of 16
+- **DiT & VAE Alignment**: Ensures both dimensions are exact multiples of 16 to prevent latent boundary artifacts during MMDiT patchification.
+- **Interpolation**: High-quality Lanczos resampling with strict aspect-ratio preservation down to a maximum bounding box of 2048px.
+
+### 4. Stufe 4 – Qwen-VL Captioning & Screening Gate
+- **High-Throughput Inference**: Offline batching via `vLLM` using `Qwen/Qwen2.5-VL-7B-Instruct` (or Qwen3-VL) with Guided JSON schema decoding (`config/vocabulary.yaml`).
+- **Non-Negotiable Compliance Gate**: Immediately rejects and logs any image failing:
+  - `subject_age_estimate < 25` or `uncertain_age == True`
+  - `watermark_detected == True` or text overlay
+  - `quality == "low"`
+- **Prompt Assembly**: Assembles 7-layer narrative captions (`Trigger` -> `Medium` -> `Subject` -> `Pose` -> `Wardrobe` -> `Environment` -> `Lighting` -> `Optics`). Supports `style` mode (omits style descriptors to let weights absorb aesthetic) and `subject` mode (describes style fully to isolate the subject).
+- **Inspection HTML**: Generates `inspection_report.html` for human audit of captions, tags, and confidence scores.
+
+### 5. Stufe 5 – Datensatz strukturieren & Export
+- **Dynamic Repeat Balancing**: Analyzes tag distribution across scenes/identities and assigns inverse-frequency repeat weights (clamped to $\le 4.0\times$) to prevent over-represented concepts from dominating.
+- **Distribution Analysis**: Flags dominance alerts whenever any single scene or subject exceeds 35% of total dataset exposure; generates `distribution_report.md`.
+- **Toolkit Formats**: Exports directory structures and configurations directly for `ai-toolkit` (`ai_toolkit_dataset.yaml`) and `musubi-tuner` (`dataset.toml`).
+
+### 6. Stufe 6 – Trainings-Tooling (AI-Toolkit)
+- **Krea 2 RAW LoRA Template**: Standardized configuration for single-stream MMDiT on Krea 2 RAW (undistilled base model) with `fp8` base quantization, LoRA rank 128 / alpha 128, learning rate `5e-5`, and full gradient checkpointing.
+- **Curated 2–3k Subset Extractor**: Selects the top 2,500 highest-quality, balanced samples for rapid A/B convergence benchmarking against the full dataset.
+
+### 7. Stufe 7 – Validierung & Benchmarking
+- **Systematic Validation Matrix**: Generates a 3-tier prompt grid (`trigger_only`, `trigger_with_core_tags`, `trigger_with_scene`) crossed against negative prompts (`none` vs. `standard`).
+- **HTML Contact Sheet**: Generates `contact_sheet.html` with interactive slider comparison across checkpoints (e.g. 500, 1000, 1500, 2000 steps).
+
+### 8. Stufe 8 – Charakter-LoRAs im selben Universum
+- **Sequential Training Stack**: Freezes the base style LoRA and trains secondary character/subject LoRAs on top of the stylized latent space.
+- **Weight Matrix Grid**: Automates evaluation matrix across style weights ($0.6 - 1.0$) and character weights ($0.6 - 1.0$) to verify aesthetic consistency without facial identity collapse.
+
+---
+
+## 🗃 Manifest & State Architecture
+
+All pipeline stages are coordinated through an atomic, append-only JSONL manifest: `data/manifest.jsonl`.
+
+- **Idempotency**: Every stage checks if an image is already processed before executing. Re-running any stage only processes newly added or pending items.
+- **Non-Destructive Rejection**: Rejected items are never deleted; their stage status is marked `rejected` alongside a structured `reject_reason` (e.g., `screening_age_under_25`, `low_sharpness_42.1`, `duplicate_of_<id>`).
+- **Real-Time Monitoring**: Run `pipeline status` at any time to inspect counts across all 8 stages.
+
+---
+
+## ⚡ Quick Start & Installation
+
+### Local / Development Setup (CPU / Verification)
 ```bash
-cd /workspace
 git clone https://github.com/Z3PP1X/krea2-vlm-captioner.git
 cd krea2-vlm-captioner
 
-chmod +x setup_runpod.sh
-./setup_runpod.sh gemma:latest   # or your preferred VLM (e.g. gemma4:32b)
+# Install package and standard dependencies
+pip install -e .
+
+# Run test suite to verify installation
+python -m pytest
 ```
 
-### 2. Run the Unified Crawl & Tag Job
-
-**XenForo Thread:**
+### Production GPU Setup (NVIDIA L40S / RTX 5090 on RunPod)
 ```bash
-python3 crawl_and_tag.py --pages 27 -t "restrained_elegance" -m "gemma:latest"
+# Install with vLLM & PyTorch GPU acceleration
+pip install -e ".[gpu]"
+
+# Or install flash-infer/vllm dependencies directly
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
+pip install vllm
 ```
 
-**dbNaked Channel:**
+---
+
+## 💻 CLI Reference
+
+The unified CLI entrypoint is `pipeline` (or `python -m pipeline.cli`):
+
 ```bash
-python3 crawl_and_tag.py --url "https://dbnaked.com/bdsm/channels/thetrainingofo.com?media=pictures" --pages 1 -t "restrained_elegance"
+# 1. Check pipeline manifest status
+pipeline status
+
+# 2. Stufe 1: Crawl with HTTP Range pre-filtering
+pipeline crawl --source-type xenforo --url "https://forum.example.com/threads/123" --pages 1-5
+pipeline crawl --source-type dbnaked --url "https://dbnaked.com/bdsm/channels/example" --pages 1
+
+# 3. Stufe 2: Quality control, EXIF strip & pHash deduplication
+pipeline qc
+
+# 4. Stufe 3: Downscale to max 2048px (multiples of 16)
+pipeline downscale --max-dim 2048
+
+# 5. Stufe 4: Qwen-VL Guided JSON Captioning & Screening Gate
+pipeline caption --model Qwen/Qwen2.5-VL-7B-Instruct --batch-size 16 --mode style
+
+# 6. Stufe 5: Balance repeats and export datasets
+pipeline export --max-factor 4.0 --target-repeats 10
+
+# 7. Stufe 6: Generate AI-Toolkit Krea 2 RAW training config
+pipeline train-config --name "krea2_style_lora" --dataset-yaml "data/export/ai_toolkit_dataset.yaml"
+
+# 8. Stufe 7: Generate systematic validation prompt grid & contact sheet
+pipeline validate --lora-name "krea2_style_lora"
+
+# 9. Stufe 8: Generate sequential character LoRA configs
+pipeline character-config --style-lora "output/krea2_style_lora/krea2_style_lora.safetensors" --character-name "eva"
+
+# Or execute Stages 1 to 5 end-to-end:
+pipeline run-all
 ```
 
-## 🔄 How the Crawl & Tag Flow Works
+---
 
-```
-[Forum Thread] 
-      │
-      ▼
-1. XenForo Crawler
-      ├── Downloads full-res images into set folders
-      └── Writes 'genres.txt' (Tags: Latex, Bondage, Corset / Title: Set 112)
-      │
-      ▼
-2. Folder Structure
-      └── downloads/
-            └── Models Tied Gallery 112/
-                  ├── genres.txt
-                  ├── image_01.jpg
-                  └── image_02.jpg
-      │
-      ▼
-3. Krea 2 VLM Captioner
-      ├── Reads image_01.jpg
-      ├── Reads genres.txt context: "Tags: Latex, Bondage; Set: Models Tied 112"
-      ├── Injects Trigger Token: "restrained_elegance"
-      └── Feeds prompt + image to Gemma / VLM
-      │
-      ▼
-4. Output Dataset
-      └── downloads/
-            └── Models Tied Gallery 112/
-                  ├── genres.txt
-                  ├── image_01.jpg
-                  ├── image_01.txt    <-- Pure 7-layer narrative caption
-                  ├── image_02.jpg
-                  └── image_02.txt    <-- Pure 7-layer narrative caption
+## 🚀 Training Runbook & Tooling
+
+Complete execution instructions for training on RunPod are provided in [docs/TRAINING.md](docs/TRAINING.md):
+
+- **Network Volume Base Model Caching**: Persist Krea 2 RAW weights on `/workspace` so new pods spin up in seconds.
+- **AI-Toolkit Execution**: Step-by-step launch commands, monitoring with TensorBoard / WandB, and checkpointing.
+- **VRAM Optimization**:
+  - **L40S (48 GB)**: `fp8` base model, rank 128 / alpha 128, batch size 2, gradient accumulation 2.
+  - **RTX 5090 (32 GB)**: `fp8` base model, rank 128 / alpha 128, batch size 1, gradient accumulation 4, gradient checkpointing enabled.
+- **Curated 2-3k vs Full Set Protocol**: Initial 1,500-step run on the curated subset to lock in learning rates and loss stability before scaling to the full dataset.
+
+---
+
+## 📚 Documentation Index
+
+- [docs/GAP_ANALYSIS.md](docs/GAP_ANALYSIS.md): Comprehensive baseline evaluation of the legacy repository vs. the target architecture.
+- [docs/MIGRATION_PLAN.md](docs/MIGRATION_PLAN.md): Detailed 3-phase technical migration blueprint covering all 8 stages.
+- [docs/TRAINING.md](docs/TRAINING.md): End-to-end RunPod operator runbook, hardware profiles, AI-Toolkit and musubi configurations, and cost calculations.
+- [config/pipeline.yaml](config/pipeline.yaml): Centralized configuration for all pipeline parameters.
+- [config/vocabulary.yaml](config/vocabulary.yaml): Controlled vocabulary schema for Pydantic and Guided JSON decoding.
+
+---
+
+## 🧪 Testing & Verification
+
+The repository includes a comprehensive unit test suite covering every stage:
+
+```bash
+python -m pytest -v
 ```
 
-### Example Generated `.txt` File:
 ```text
-restrained_elegance Photograph of a slender woman with fair skin and straight blonde hair, kneeling gracefully on all fours with an arched back on a black glossy reflective floor. She is wearing polished stainless steel wrist cuffs connected to a taut shiny silver chain. The background is a pitch-black studio void creating stark contrast. Focused directional studio spotlighting creates sculptural highlights along her back. Crisp 50mm lens focus with shallow depth of field.
+tests/test_manifest.py           3 passed
+tests/test_stage1_prefilter.py   6 passed
+tests/test_stage2_qc.py          3 passed
+tests/test_stage3_downscale.py   3 passed
+tests/test_stage4_assembly.py    3 passed
+tests/test_stage4_screening.py   4 passed
+tests/test_stage5_export.py      3 passed
+tests/test_stage6_7_8.py         4 passed
+====================== 29 passed in 0.89s ======================
 ```
-
----
-
-## 💻 CLI Commands & Options
-
-### 1. `crawl_and_tag.py` (Unified Pipeline)
-```bash
-python crawl_and_tag.py [CRAWLER OPTIONS] [CAPTIONER OPTIONS]
-```
-
-* `--pages` / `-p`: Pages to crawl (`27`, `11-15`, `all`).
-* `-t` / `--trigger`: LoRA trigger word (e.g. `restrained_elegance`, `shibori`).
-* `-o` / `--output-dir`: Output folder (default: `./downloads`).
-* `-m` / `--model`: Model name in Ollama / vLLM (default: `gemma4:32b`).
-* `-u` / `--url-vlm`: Inference URL (default: `http://localhost:11434`).
-* `--skip-crawl`: Skip downloading; only caption existing folders in `--output-dir`.
-* `--skip-caption`: Only crawl and download without running the captioner.
-* `--save-json`: Save `<image>.json` with full 7-layer scene breakdown alongside `<image>.txt`.
-
-### 2. `caption_images.py` (Standalone Captioning)
-Run captioning independently on any folder or pre-existing downloads:
-```bash
-# Tag an existing crawler downloads folder recursively:
-python caption_images.py -i ./downloads -r -t "restrained_elegance"
-
-# Tag a single set directory:
-python caption_images.py -i "./downloads/Models Tied Gallery 112" -t "shibori"
-```
-
-### 3. `dbnaked_crawler.py` (dbNaked Channel & Gallery Crawler)
-Crawl any dbNaked channel or studio directly:
-```bash
-# Crawl page 1 of Infernal Restraints channel:
-python dbnaked_crawler.py --url "https://dbnaked.com/bdsm/channels/infernalrestraints.com" -p 1 -o ./downloads
-
-# Crawl pages 1 to 3 with 6 worker threads:
-python dbnaked_crawler.py --url "https://dbnaked.com/bdsm/channels/infernalrestraints.com" -p 1-3 -w 6 -o ./downloads
-```
-
-### 4. `crawler.py` (Standalone XenForo Forum Crawler)
-Run the XenForo crawler independently:
-```bash
-python crawler.py --pages 27 -o ./downloads
-```
-
----
-
-## 🚀 High-Speed Batching with vLLM on RunPod
-
-For maximum throughput with continuous batching:
-1. Launch vLLM server:
-   ```bash
-   chmod +x vllm_server_runpod.sh
-   ./vllm_server_runpod.sh Qwen/Qwen2.5-VL-7B-Instruct 8000
-   ```
-2. Run pipeline with `--backend openai`:
-   ```bash
-   python3 crawl_and_tag.py \
-     --pages 27 \
-     -t "restrained_elegance" \
-     --backend openai \
-     --url-vlm http://localhost:8000/v1 \
-     -m "Qwen/Qwen2.5-VL-7B-Instruct" \
-     --caption-workers 4
-   ```
 
 ---
 
