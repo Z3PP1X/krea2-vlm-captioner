@@ -70,17 +70,25 @@ class QwenVLEngine:
         """Processes a batch of images through vLLM using Guided Decoding with assistant prefill '{'."""
         self._ensure_model_loaded()
 
-        from vllm import SamplingParams
-        from vllm.sampling_params import GuidedDecodingParams
-
         temp = self.temperature if temperature is None else temperature
-        guided_params = GuidedDecodingParams(json=json_schema)
-        sampling_params = SamplingParams(
-            temperature=temp,
-            max_tokens=self.max_tokens,
-            guided_decoding=guided_params,
-            seed=seed,
-        )
+        sampling_kwargs: Dict[str, Any] = {
+            "temperature": temp,
+            "max_tokens": self.max_tokens,
+            "seed": seed,
+        }
+
+        # Support both modern vLLM (StructuredOutputsParams) and legacy (GuidedDecodingParams)
+        try:
+            from vllm.sampling_params import StructuredOutputsParams
+            sampling_kwargs["structured_outputs"] = StructuredOutputsParams(json=json_schema)
+        except ImportError:
+            try:
+                from vllm.sampling_params import GuidedDecodingParams
+                sampling_kwargs["guided_decoding"] = GuidedDecodingParams(json=json_schema)
+            except ImportError:
+                sampling_kwargs["structured_outputs"] = {"json": json_schema}
+
+        sampling_params = SamplingParams(**sampling_kwargs)
 
         inputs = []
         for img_path, u_prompt in zip(image_paths, user_prompts):
