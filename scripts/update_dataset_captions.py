@@ -41,7 +41,7 @@ IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Audit and elevate existing dataset captions to 400+ token Krea 2 visual narratives."
+        description="Audit and elevate existing dataset captions to 550-1024 token Krea 2 visual narratives."
     )
     parser.add_argument(
         "--dataset-dir",
@@ -76,14 +76,14 @@ def parse_args():
     parser.add_argument(
         "--max-tokens",
         type=int,
-        default=750,
-        help="Maximum generation token budget (default: 750).",
+        default=1024,
+        help="Maximum generation token budget (default: 1024).",
     )
     parser.add_argument(
         "--min-tokens",
         type=int,
-        default=400,
-        help="Target minimum caption tokens (default: 400).",
+        default=550,
+        help="Target minimum caption tokens (default: 550).",
     )
     parser.add_argument(
         "--batch-size",
@@ -266,7 +266,7 @@ def main():
     total_items = len(items)
     batch_size = args.batch_size
     total_batches = (total_items + batch_size - 1) // batch_size
-    logger.info(f"\nStarting refinement across {total_batches} batches (raw caption text mode, target: >= 400 tokens)...")
+    logger.info(f"\nStarting refinement across {total_batches} batches (raw caption text mode, target: 550-1024 tokens)...")
 
     refined_count = 0
     failed_count = 0
@@ -292,18 +292,27 @@ def main():
                     f"Existing Draft Caption:\n\"{existing}\"\n\n"
                     f"Refinement Task:\n"
                     f"1. Audit the draft caption against this image. Fix any hallucinations or inaccurate rope/hardware terms.\n"
-                    f"2. EXPAND the caption into an exhaustive 7-layer Krea 2 visual narrative of AT LEAST 400 TOKENS (~280-350+ words in fluent English).\n"
-                    f"3. Fully describe: (1) Medium/framing, (2) Subject anatomy/skin texture, (3) Pose mechanics/tension, "
-                    f"(4) Exact shibari knots (takate-kote, hishime, kikko) or metallic hardware (chrome handcuffs, O-rings, carabiners), "
-                    f"(5) Studio environment/flooring, (6) Chiaroscuro lighting/specular highlights, and (7) Camera optics/DoF.\n"
+                    f"2. EXPAND the caption into an exhaustive Krea 2 visual narrative of AT LEAST 550 TOKENS and up to 1024 tokens (~380-500+ words in fluent English).\n"
+                    f"3. Fully describe:\n"
+                    f"   - (1) Model Position & posture geometry (kneeling, seiza, standing, arched on all fours, limb angles, physical contact points, muscle tension, gravitational weight distribution)\n"
+                    f"   - (2) Bondage Type (shibari rope bondage, metallic chain restraint, leather bondage, suspension, predicament bondage)\n"
+                    f"   - (3) Bondage Equipment & materials (5-8mm unbleached hemp/jute cordage, welded steel chains, chrome handcuffs, O-rings, carabiners, spreader bars, posture collar, padlocks)\n"
+                    f"   - (4) Bondage Position & anatomical rigging (takate-kote box tie, hishime chest harness, wrist/ankle positioning, stem lines, leash tension, skin indentation bite marks)\n"
+                    f"   - (5) Studio environment & flooring (glossy reflective black floor, concrete, dark void)\n"
+                    f"   - (6) Chiaroscuro lighting & specular highlights skimming contours\n"
+                    f"   - (7) Camera optics, focal length (50mm/85mm), and shallow depth of field.\n"
                     f"Output raw caption text only. Do not output JSON."
                 )
             else:
                 prompt_text = (
                     f"Task:\n"
-                    f"Inspect this image and write an exhaustive 7-layer Krea 2 visual narrative of AT LEAST 400 TOKENS (~280-350+ words).\n"
-                    f"Meticulously detail subject anatomy, body tension, exact shibari knots or bondage hardware, tactile textures, "
-                    f"studio environment, lighting gradients, and camera optics.\n"
+                    f"Inspect this image and write an exhaustive Krea 2 visual narrative of AT LEAST 550 TOKENS and up to 1024 tokens (~380-500+ words).\n"
+                    f"Meticulously and exhaustively detail:\n"
+                    f"- Model Position & anatomical posture (exact limb angles, spinal curvature, tension, contact points)\n"
+                    f"- Bondage Type & discipline classification\n"
+                    f"- Bondage Equipment & materials (cordage diameter, steel chain gauge, chrome cuffs, O-rings, hardware)\n"
+                    f"- Bondage Position & anatomical placement (takate-kote, chest harness, ankle/wrist ties, skin bite indentations)\n"
+                    f"- Studio environment, flooring reflections, chiaroscuro lighting, and camera optics.\n"
                     f"Output raw caption text only. Do not output JSON."
                 )
             user_prompts.append(prompt_text)

@@ -285,18 +285,26 @@ def run_stage4(args: Any, config: Dict[str, Any]) -> int:
             if refine_mode and existing_caption:
                 user_prompts.append(
                     f"Existing Draft Caption: \"{existing_caption}\"\n"
-                    f"Refinement Task: Audit and elevate this draft caption into an exhaustive 7-layer Krea 2 visual narrative. "
-                    f"Correct any visual errors or inaccurate shibari/hardware terms. The output caption MUST be at least 400 tokens long "
-                    f"(approx. 280-350+ words in detailed natural English), thoroughly detailing subject anatomy, body tension, exact knot patterns "
-                    f"or bondage hardware, tactile textures, studio environment, lighting gradients, and camera optics. "
+                    f"Refinement Task: Audit and elevate this draft caption into an exhaustive Krea 2 visual narrative. "
+                    f"Correct any visual errors or inaccurate terms. The output caption MUST be at least 550 tokens long and up to 1024 tokens "
+                    f"(approx. 380-500+ words in detailed natural English), exhaustively detailing: "
+                    f"(1) Model Position & posture geometry (kneeling, arched spine, limb angles, physical contact points, muscle tension), "
+                    f"(2) Bondage Type (shibari rope, chain restraint, leather bondage, suspension, predicament), "
+                    f"(3) Bondage Equipment & materials (5-8mm hemp/jute rope, welded steel chains, chrome handcuffs, O-rings, carabiners, spreader bars, leather collars), "
+                    f"(4) Bondage Position & anatomical rigging (takate-kote box tie, hishime chest harness, wrist/ankle placement, skin bite indentations), "
+                    f"(5) Studio environment/flooring, (6) Chiaroscuro lighting/specular highlights, and (7) Camera optics/DoF. "
                     f"Output raw caption text only. Do not output JSON. {context}"
                 )
             else:
                 user_prompts.append(
-                    f"Task: Inspect this image and write an exhaustive 7-layer Krea 2 visual narrative. "
-                    f"The output caption MUST be at least 400 tokens long (approx. 280-350+ words in detailed natural English), "
-                    f"meticulously detailing subject anatomy, body tension, exact shibari knots or bondage hardware, tactile textures, "
-                    f"studio environment, lighting gradients, and camera optics. "
+                    f"Task: Inspect this image and write an exhaustive Krea 2 visual narrative. "
+                    f"The output caption MUST be at least 550 tokens long and up to 1024 tokens (approx. 380-500+ words in detailed natural English), "
+                    f"exhaustively detailing: "
+                    f"(1) Model Position & posture geometry (kneeling, arched spine, limb angles, physical contact points, muscle tension), "
+                    f"(2) Bondage Type (shibari rope, chain restraint, leather bondage, suspension, predicament), "
+                    f"(3) Bondage Equipment & materials (5-8mm hemp/jute rope, welded steel chains, chrome handcuffs, O-rings, carabiners, spreader bars, leather collars), "
+                    f"(4) Bondage Position & anatomical rigging (takate-kote box tie, hishime chest harness, wrist/ankle placement, skin bite indentations), "
+                    f"(5) Studio environment/flooring, (6) Chiaroscuro lighting/specular highlights, and (7) Camera optics/DoF. "
                     f"Output raw caption text only. Do not output JSON. {context}"
                 )
 
