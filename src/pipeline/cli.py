@@ -128,9 +128,15 @@ def build_parser() -> argparse.ArgumentParser:
 
     # Stage 3: Downscale
     downscale_parser = subparsers.add_parser("downscale", help="Stufe 3: Downscale to max 2048px (multiples of 16)")
+    downscale_parser.add_argument("-w", "--max-workers", type=int, default=None, help="Concurrent CPU resizing workers (e.g. 8)")
+    downscale_parser.add_argument("--max-dim", type=int, default=None, help="Max bounding box edge in pixels (default: 2048)")
 
     # Stage 4: Caption
     caption_parser = subparsers.add_parser("caption", help="Stufe 4: Qwen-VL Offline-Batch captioning & screening")
+    caption_parser.add_argument("-b", "--batch-size", type=int, default=None, help="Parallel GPU batch size (e.g. 16, 32, 64)")
+    caption_parser.add_argument("-m", "--model", type=str, default=None, help="Hugging Face model ID (e.g. Qwen/Qwen2.5-VL-7B-Instruct)")
+    caption_parser.add_argument("--mode", type=str, choices=["style", "subject"], default=None, help="Caption mode ('style' omits style keywords; 'subject' includes all)")
+    caption_parser.add_argument("-t", "--trigger", type=str, default=None, help="Trigger token prepended to captions")
     caption_parser.add_argument("--sample", type=int, default=None, help="Process random sample (e.g. --sample 200)")
 
     # Stage 5: Export

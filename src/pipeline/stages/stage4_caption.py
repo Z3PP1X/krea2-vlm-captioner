@@ -66,9 +66,10 @@ def run_stage4(args: Any, config: Dict[str, Any]) -> int:
     json_schema = get_vllm_json_schema(vocab)
     system_prompt = build_system_prompt(vocab)
 
-    batch_size = int(cap_cfg.get("batch_size", 16))
-    trigger_word = cap_cfg.get("trigger_word", "restrained_elegance")
-    caption_mode = cap_cfg.get("caption_mode", "style")
+    model_name = getattr(args, "model", None) or cap_cfg.get("model_name", "Qwen/Qwen2.5-VL-7B-Instruct")
+    batch_size = getattr(args, "batch_size", None) or int(cap_cfg.get("batch_size", 16))
+    trigger_word = getattr(args, "trigger", None) or cap_cfg.get("trigger_word", "restrained_elegance")
+    caption_mode = getattr(args, "mode", None) or cap_cfg.get("caption_mode", "style")
     template = cap_cfg.get("caption_template", "{trigger} {style} {location} {description} {lighting_camera}")
 
     min_age = int(screening_cfg.get("min_subject_age", 25))
@@ -87,7 +88,7 @@ def run_stage4(args: Any, config: Dict[str, Any]) -> int:
     logger.info("=" * 60)
     logger.info("  STUFE 4: QWEN-VL CAPTIONING & VERBINDLICHES SCREENING")
     logger.info("=" * 60)
-    logger.info(f"VLM Engine / Model    : {cap_cfg.get('model_name', 'Qwen-VL')}")
+    logger.info(f"VLM Engine / Model    : {model_name}")
     logger.info(f"Trigger Token         : {trigger_word}")
     logger.info(f"Caption Mode          : {caption_mode} (style omitted in text: {caption_mode == 'style'})")
     logger.info(f"Screening Gate        : Enforced (Min Age: {min_age}, Reject Uncertain: {reject_uncertain_age})")
@@ -113,7 +114,7 @@ def run_stage4(args: Any, config: Dict[str, Any]) -> int:
 
     # 2. Initialize VLM Engine
     engine = QwenVLEngine(
-        model_name=cap_cfg.get("model_name", "Qwen/Qwen2.5-VL-7B-Instruct"),
+        model_name=model_name,
         gpu_memory_utilization=float(cap_cfg.get("vllm_gpu_memory_utilization", 0.85)),
         max_model_len=int(cap_cfg.get("max_model_len", 4096)),
         temperature=float(cap_cfg.get("temperature", 0.2)),

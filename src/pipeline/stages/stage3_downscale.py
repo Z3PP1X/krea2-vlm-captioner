@@ -7,6 +7,7 @@ import logging
 from pathlib import Path
 from typing import Dict, Any, Tuple
 from PIL import Image
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from pipeline.manifest import Manifest, ManifestEntry
 
@@ -54,7 +55,8 @@ def run_stage3(args: Any, config: Dict[str, Any]) -> int:
     processed_dir = Path(general_cfg.get("processed_dir", "data/processed")) / "images"
     processed_dir.mkdir(parents=True, exist_ok=True)
 
-    max_long_edge = int(downscale_cfg.get("max_long_edge", 2048))
+    workers = getattr(args, "max_workers", None) or 8
+    max_long_edge = getattr(args, "max_dim", None) or int(downscale_cfg.get("max_long_edge", 2048))
     multiple_of = int(downscale_cfg.get("multiple_of", 16))
     out_format = downscale_cfg.get("format", "jpeg").lower()
     jpeg_quality = int(downscale_cfg.get("jpeg_quality", 95))
@@ -62,6 +64,7 @@ def run_stage3(args: Any, config: Dict[str, Any]) -> int:
     logger.info("=" * 60)
     logger.info("  STUFE 3: DOWNSCALING & STANDARDIZATION")
     logger.info("=" * 60)
+    logger.info(f"Workers               : {workers}")
     logger.info(f"Max Long Edge         : {max_long_edge} px (No upscaling)")
     logger.info(f"Multiple of (DiT/VAE) : {multiple_of} px")
     logger.info(f"Output Format         : {out_format.upper()} (Quality {jpeg_quality})")
@@ -81,13 +84,13 @@ def run_stage3(args: Any, config: Dict[str, Any]) -> int:
         return 0
 
     success_count = 0
+    failed_count = 0
 
-    for idx, entry in enumerate(eligible, 1):
+    def process_downscale(entry: ManifestEntry) -> tuple[str, Any]:
         raw_path = entry.get_raw_file()
         if not raw_path or not raw_path.exists():
-            logger.warning(f"Raw file missing for {entry.image_id}: {entry.raw_path}")
             entry.update_stage("stage3_downscale", "failed", reasons=["missing_raw_file"])
-            continue
+            return ("failed", entry.image_id, "missing_raw_file")
 
         try:
             with Image.open(raw_path) as img:
@@ -104,11 +107,9 @@ def run_stage3(args: Any, config: Dict[str, Any]) -> int:
                 else:
                     resampled = img.copy()
 
-                # Ensure RGB mode for JPEG
                 if out_format == "jpeg" and resampled.mode != "RGB":
                     resampled = resampled.convert("RGB")
 
-                # Destination file naming
                 ext = ".jpg" if out_format == "jpeg" else ".png"
                 dest_filename = f"{entry.image_id[:16]}{ext}"
                 dest_file_path = processed_dir / dest_filename
@@ -120,7 +121,6 @@ def run_stage3(args: Any, config: Dict[str, Any]) -> int:
 
                 rel_processed_path = os.path.relpath(dest_file_path, Path(general_cfg.get("manifest_path", "data")).parent).replace("\\", "/")
 
-                # Update Manifest
                 entry.processed_path = rel_processed_path
                 entry.width = new_w
                 entry.height = new_h
@@ -129,17 +129,43 @@ def run_stage3(args: Any, config: Dict[str, Any]) -> int:
                 entry.update_stage("stage3_downscale", "done")
                 entry.stages_status["stage4_caption"] = "pending"
 
-                success_count += 1
-                logger.info(f"[{idx}/{len(eligible)}] Downscaled {raw_path.name}: {orig_w}x{orig_h} -> {new_w}x{new_h}")
+                return ("success", raw_path.name, orig_w, orig_h, new_w, new_h)
 
         except Exception as exc:
-            logger.error(f"Error downscaling {raw_path}: {exc}")
             entry.update_stage("stage3_downscale", "failed", reasons=[f"downscale_error_{type(exc).__name__}"])
+            return ("failed", entry.image_id, str(exc))
+
+    if workers <= 1:
+        for idx, entry in enumerate(eligible, 1):
+            res = process_downscale(entry)
+            if res[0] == "success":
+                success_count += 1
+                logger.info(f"[{idx}/{len(eligible)}] Downscaled {res[1]}: {res[2]}x{res[3]} -> {res[4]}x{res[5]}")
+            else:
+                failed_count += 1
+    else:
+        logger.info(f"Downscaling concurrently with {workers} CPU workers...")
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            future_to_entry = {executor.submit(process_downscale, entry): entry for entry in eligible}
+            done_idx = 0
+            for future in as_completed(future_to_entry):
+                done_idx += 1
+                try:
+                    res = future.result()
+                    if res[0] == "success":
+                        success_count += 1
+                        if done_idx % 25 == 0 or done_idx == len(eligible):
+                            logger.info(f"[{done_idx}/{len(eligible)}] Processed downscaling ({success_count} succeeded)")
+                    else:
+                        failed_count += 1
+                except Exception as exc:
+                    failed_count += 1
+                    logger.error(f"Worker exception during downscale: {exc}")
 
     manifest.save()
 
     logger.info("=" * 60)
-    logger.info(f"  STUFE 3 ERGEBNIS: {success_count} Bilder erfolgreich aufbereitet")
+    logger.info(f"  STUFE 3 ERGEBNIS: {success_count} Bilder erfolgreich aufbereitet (Fehlgeschlagen: {failed_count})")
     logger.info("=" * 60)
 
     return 0
