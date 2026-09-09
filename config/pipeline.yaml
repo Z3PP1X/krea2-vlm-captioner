@@ -56,8 +56,8 @@ stage4_caption:
     check_age: false                  # Age verification disabled (manually verified by user)
     min_subject_age: 0                # Age check disabled
     reject_uncertain_age: false       # Uncertainty check disabled
-    reject_watermark: true            # Reject if has_watermark is true
-    reject_text: true                 # Reject if has_text is true
+    reject_watermark: false           # Disabled: Allows studio/forum photography with photographer/corner watermarks
+    reject_text: false                # Disabled: Allows images with corner stamps/URLs
     reject_low_quality: true          # Reject if quality is 'low'
 
   retry:

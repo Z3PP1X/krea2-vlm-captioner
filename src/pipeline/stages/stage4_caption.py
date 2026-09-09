@@ -92,9 +92,13 @@ def run_stage4(args: Any, config: Dict[str, Any]) -> int:
     check_age = bool(screening_cfg.get("check_age", False))
     min_age = int(screening_cfg.get("min_subject_age", 0)) if check_age else 0
     reject_uncertain_age = bool(screening_cfg.get("reject_uncertain_age", False)) if check_age else False
-    reject_watermark = screening_cfg.get("reject_watermark", True)
-    reject_text = screening_cfg.get("reject_text", True)
-    reject_low_quality = screening_cfg.get("reject_low_quality", True)
+
+    no_screening = bool(getattr(args, "no_screening", False))
+    ignore_watermarks = bool(getattr(args, "ignore_watermarks", False))
+
+    reject_watermark = False if (no_screening or ignore_watermarks) else bool(screening_cfg.get("reject_watermark", False))
+    reject_text = False if (no_screening or ignore_watermarks) else bool(screening_cfg.get("reject_text", False))
+    reject_low_quality = False if no_screening else bool(screening_cfg.get("reject_low_quality", True))
 
     max_retries = int(retry_cfg.get("max_retries", 2))
     temp_step = float(retry_cfg.get("temp_step", 0.1))
@@ -109,7 +113,8 @@ def run_stage4(args: Any, config: Dict[str, Any]) -> int:
     logger.info(f"VLM Engine / Model    : {model_name}")
     logger.info(f"Trigger Token         : {trigger_word}")
     logger.info(f"Caption Mode          : {caption_mode} (style omitted in text: {caption_mode == 'style'})")
-    logger.info(f"Screening Gate        : Watermarks, Text, Quality (Age Gate: {'Active (' + str(min_age) + '+)' if check_age else 'Disabled (User-Verified)'})")
+    gate_status = "Disabled (--no-screening)" if no_screening else f"Active (Watermarks: {'Reject' if reject_watermark else 'Allow'}, Text: {'Reject' if reject_text else 'Allow'})"
+    logger.info(f"Screening Gate        : {gate_status}")
     logger.info(f"Batch Size            : {batch_size}")
     logger.info(f"Sample Mode           : {sample_size if sample_size else 'Full Dataset'}")
     logger.info("=" * 60)
@@ -120,6 +125,7 @@ def run_stage4(args: Any, config: Dict[str, Any]) -> int:
     # 1. Gather eligible items
     # Check if stage 3 downscaling was run
     downscale_done_count = sum(1 for e in manifest if e.stages_status.get("stage3_downscale") == "done")
+    recheck_screening = (not reject_watermark or not reject_text or no_screening)
 
     if downscale_done_count > 0:
         eligible = [
@@ -129,6 +135,11 @@ def run_stage4(args: Any, config: Dict[str, Any]) -> int:
                 force
                 or e.stages_status.get("stage4_caption") in ["pending", None]
                 or (retry_failed and e.stages_status.get("stage4_caption") == "failed")
+                or (
+                    recheck_screening
+                    and e.stages_status.get("stage4_caption") == "rejected_screening"
+                    and any("watermark" in r or "text" in r for r in e.rejection_reasons)
+                )
             )
         ]
     else:
@@ -140,6 +151,11 @@ def run_stage4(args: Any, config: Dict[str, Any]) -> int:
                 force
                 or e.stages_status.get("stage4_caption") in ["pending", None]
                 or (retry_failed and e.stages_status.get("stage4_caption") == "failed")
+                or (
+                    recheck_screening
+                    and e.stages_status.get("stage4_caption") == "rejected_screening"
+                    and any("watermark" in r or "text" in r for r in e.rejection_reasons)
+                )
             )
         ]
         if qc_passed_entries:
@@ -308,7 +324,10 @@ def run_stage4(args: Any, config: Dict[str, Any]) -> int:
 
             rel_txt_path = os.path.relpath(txt_path, Path(general_cfg.get("manifest_path", "data")).parent).replace("\\", "/")
 
-            entry.rejection_reasons = [r for r in entry.rejection_reasons if not r.startswith("vllm_error")]
+            entry.rejection_reasons = [
+                r for r in entry.rejection_reasons
+                if not (r.startswith("vllm_error") or r.startswith("screening_"))
+            ]
             entry.caption_data = res_data
             entry.caption_text = caption_text
             entry.caption_path = rel_txt_path

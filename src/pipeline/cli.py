@@ -142,6 +142,8 @@ def build_parser() -> argparse.ArgumentParser:
     caption_parser.add_argument("-t", "--trigger", type=str, default=None, help="Trigger token prepended to captions")
     caption_parser.add_argument("--sample", type=int, default=None, help="Process random sample (e.g. --sample 200)")
     caption_parser.add_argument("--max-model-len", type=int, default=None, help="Maximum context length in tokens (default: 12288)")
+    caption_parser.add_argument("--ignore-watermarks", action="store_true", help="Do not reject images due to watermarks or text overlays")
+    caption_parser.add_argument("--no-screening", action="store_true", help="Bypass all screening gates and keep all generated captions")
     caption_parser.add_argument("--force", action="store_true", help="Force recaptioning of all valid images, ignoring previous status")
     caption_parser.add_argument("--retry-failed", action="store_true", default=True, help="Retry images that previously failed captioning (default: True)")
 

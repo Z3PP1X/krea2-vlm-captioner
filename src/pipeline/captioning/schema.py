@@ -52,8 +52,8 @@ def build_dynamic_caption_model(vocab: Dict[str, List[str]]) -> Type[BaseModel]:
         "lighting_camera": (str, Field(description="Lighting style, optics, and camera framing")),
         "subject_age_estimate": (Optional[int], Field(default=None, description="Estimated numerical age of the adult subject (or null if unidentifiable)")),
         "uncertain_age": (bool, Field(description="True if the subject's age cannot be clearly verified as >=25")),
-        "has_watermark": (bool, Field(description="True if visible watermark, copyright stamp, or logo is present")),
-        "has_text": (bool, Field(description="True if non-environmental overlaid text or subtitle is present")),
+        "has_watermark": (bool, Field(description="True ONLY if a large, intrusive watermark covers the main subject (ignore small photographer corner credits)")),
+        "has_text": (bool, Field(description="True ONLY if prominent overlaid subtitles or memes block the scene")),
         "quality": (QualityEnum, Field(description="Visual quality grade of the image")),
         "person_description_generic": (bool, Field(description="True if person features are described generically without unique identities")),
     }
@@ -84,6 +84,5 @@ def build_system_prompt(vocab: Dict[str, List[str]]) -> str:
         f"   - Allowed locations: [{locations_str}]\n"
         f"   - Allowed poses: [{poses_str}]\n"
         "   If an element does not match, use 'other'.\n"
-        "4. Age Verification: Carefully inspect all human subjects. If any subject appears under 25 or if age cannot be definitively verified, set 'uncertain_age' to true.\n"
-        "5. Respond with a single valid JSON object. Do not include markdown ticks, preamble, or commentary."
+        "4. Respond with a single valid JSON object. Do not include markdown ticks, preamble, or commentary."
     )
