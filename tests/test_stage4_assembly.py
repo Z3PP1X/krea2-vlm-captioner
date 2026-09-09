@@ -84,7 +84,37 @@ def test_qwen_model_aliases():
         "qwen-3.8": "Qwen/Qwen2.5-VL-3B-Instruct",
         "qwen-3.8b": "Qwen/Qwen2.5-VL-3B-Instruct",
         "krea2": "Qwen/Qwen2.5-VL-3B-Instruct",
+        "gemma4": "google/gemma-4-E4B-it",
+        "gemma-4": "google/gemma-4-E4B-it",
+        "gemma4-e4b": "google/gemma-4-E4B-it",
+        "gemma4-12b": "google/gemma-4-12B-it",
+        "paligemma": "google/paligemma2-3b-pt-448",
     }
     for alias, expected in model_aliases.items():
         assert model_aliases.get(alias.lower().strip()) == expected
+
+
+def test_build_prompt_gemma4_and_qwen():
+    from pipeline.captioning.vllm_engine import QwenVLEngine
+
+    # Gemma 4
+    gemma_engine = QwenVLEngine(model_name="google/gemma-4-E4B-it")
+    p_gemma = gemma_engine.build_prompt("sys_instruction", "describe this")
+    assert "<|turn>system\nsys_instruction<turn|>" in p_gemma
+    assert "<|turn>user\n<|image|>describe this<turn|>" in p_gemma
+    assert "<|turn>model\n{" in p_gemma
+
+    # PaliGemma
+    pali_engine = QwenVLEngine(model_name="google/paligemma2-3b-pt-448")
+    p_pali = pali_engine.build_prompt("sys_instruction", "describe this")
+    assert "<start_of_turn>user\n<image>sys_instruction\ndescribe this<end_of_turn>" in p_pali
+    assert "<start_of_turn>model\n{" in p_pali
+
+    # Qwen
+    qwen_engine = QwenVLEngine(model_name="Qwen/Qwen2.5-VL-7B-Instruct")
+    p_qwen = qwen_engine.build_prompt("sys_instruction", "describe this")
+    assert "<|im_start|>system\nsys_instruction<|im_end|>" in p_qwen
+    assert "<|vision_start|><|image_pad|><|vision_end|>" in p_qwen
+    assert "<|im_start|>assistant\n{" in p_qwen
+
 

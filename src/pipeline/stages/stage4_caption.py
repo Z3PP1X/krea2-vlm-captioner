@@ -82,6 +82,22 @@ def run_stage4(args: Any, config: Dict[str, Any]) -> int:
         "qwen-7b": "Qwen/Qwen2.5-VL-7B-Instruct",
         "27b": "Qwen/Qwen3.8-27B",
         "qwen27b": "Qwen/Qwen3.8-27B",
+        # Gemma 4 & PaliGemma Multimodal Family
+        "gemma": "google/gemma-4-E4B-it",
+        "gemma4": "google/gemma-4-E4B-it",
+        "gemma-4": "google/gemma-4-E4B-it",
+        "gemma4-e4b": "google/gemma-4-E4B-it",
+        "gemma-4-e4b": "google/gemma-4-E4B-it",
+        "gemma4-e2b": "google/gemma-4-E2B-it",
+        "gemma-4-e2b": "google/gemma-4-E2B-it",
+        "gemma4-12b": "google/gemma-4-12B-it",
+        "gemma-4-12b": "google/gemma-4-12B-it",
+        "gemma4-26b": "google/gemma-4-26B-it",
+        "gemma-4-26b": "google/gemma-4-26B-it",
+        "gemma4-31b": "google/gemma-4-31B-it",
+        "gemma-4-31b": "google/gemma-4-31B-it",
+        "paligemma": "google/paligemma2-3b-pt-448",
+        "paligemma2": "google/paligemma2-3b-pt-448",
     }
     model_name = model_aliases.get(raw_model.lower().strip(), raw_model)
     batch_size = getattr(args, "batch_size", None) or int(cap_cfg.get("batch_size", 16))

@@ -58,6 +58,30 @@ class QwenVLEngine:
                 "If numpy version conflict, downgrade with 'pip install \"numpy<2\"'."
             ) from exc
 
+    def build_prompt(self, system_prompt: str, user_prompt: str) -> str:
+        """Formats model-family specific multimodal chat prompt with assistant '{' prefill."""
+        m_lower = self.model_name.lower()
+        if "gemma-4" in m_lower or "gemma4" in m_lower:
+            # Gemma 4 native turn format
+            return (
+                f"<|turn>system\n{system_prompt}<turn|>\n"
+                f"<|turn>user\n<|image|>{user_prompt}<turn|>\n"
+                f"<|turn>model\n{{"
+            )
+        elif "paligemma" in m_lower or "gemma" in m_lower:
+            # PaliGemma / Gemma 2 turn format
+            return (
+                f"<start_of_turn>user\n<image>{system_prompt}\n{user_prompt}<end_of_turn>\n"
+                f"<start_of_turn>model\n{{"
+            )
+        else:
+            # Default Qwen-VL chat format
+            return (
+                f"<|im_start|>system\n{system_prompt}<|im_end|>\n"
+                f"<|im_start|>user\n<|vision_start|><|image_pad|><|vision_end|>{user_prompt}<|im_end|>\n"
+                f"<|im_start|>assistant\n{{"
+            )
+
     def generate_batch(
         self,
         image_paths: List[Path],
@@ -97,12 +121,7 @@ class QwenVLEngine:
             with Image.open(img_path) as pil_img:
                 img_copy = pil_img.convert("RGB")
 
-            # Format Qwen-VL chat prompt with assistant prefill '{'
-            prompt_str = (
-                f"<|im_start|>system\n{system_prompt}<|im_end|>\n"
-                f"<|im_start|>user\n<|vision_start|><|image_pad|><|vision_end|>{u_prompt}<|im_end|>\n"
-                f"<|im_start|>assistant\n{{"
-            )
+            prompt_str = self.build_prompt(system_prompt, u_prompt)
             inputs.append({
                 "prompt": prompt_str,
                 "multi_modal_data": {"image": img_copy},
