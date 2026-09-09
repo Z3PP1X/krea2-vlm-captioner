@@ -31,6 +31,8 @@ from pipeline.captioning.schema import (
     load_vocabulary,
     get_vllm_json_schema,
     build_system_prompt,
+    determine_caption_tier,
+    build_tier_prompt,
 )
 from pipeline.captioning.assembly import assemble_caption
 from pipeline.captioning.hf_gemma4_engine import Gemma4HfEngine
@@ -126,6 +128,19 @@ def parse_args():
         dest="show_captions",
         action="store_false",
         help="Disable full caption terminal printing (only show summary lines).",
+    )
+    parser.add_argument(
+        "--tiers",
+        type=str,
+        default="30,40,30",
+        help="Percentage distribution for [tags, short, dense] captions (default: '30,40,30').",
+    )
+    parser.add_argument(
+        "--tier-mode",
+        type=str,
+        default="auto",
+        choices=["auto", "dense-only", "short-only", "tags-only"],
+        help="Enforce a specific tier or use 'auto' to apply the --tiers distribution (default: auto).",
     )
     parser.add_argument(
         "-v", "--verbose",
@@ -277,10 +292,24 @@ def main():
     )
     engine._ensure_model_loaded()
 
+    # Parse distribution
+    try:
+        t_parts = [int(p.strip()) for p in args.tiers.split(",")]
+        tier_dist = (t_parts[0], t_parts[1], t_parts[2])
+    except Exception:
+        tier_dist = (30, 40, 30)
+
+    tier_stats = {
+        "tags": {"count": 0, "words": 0},
+        "short": {"count": 0, "words": 0},
+        "dense": {"count": 0, "words": 0},
+    }
+
     total_items = len(items)
     batch_size = args.batch_size
     total_batches = (total_items + batch_size - 1) // batch_size
-    logger.info(f"\nStarting refinement across {total_batches} batches (raw caption text mode, target: 150-340 tokens)...")
+    logger.info(f"\nStarting refinement across {total_batches} batches...")
+    logger.info(f"Tier Distribution : {tier_dist[0]}% Tags | {tier_dist[1]}% Short (max 150 tok) | {tier_dist[2]}% Dense (max 340 tok)")
 
     refined_count = 0
     failed_count = 0
@@ -295,40 +324,42 @@ def main():
         image_paths = [it["image_path"] for it in batch_items]
         user_prompts = []
 
-        for it in batch_items:
+        for idx_in_batch, it in enumerate(batch_items):
+            global_idx = b_start + idx_in_batch
             img_name = it["image_path"].name
             existing = it["existing_caption"]
             w_old = len(existing.split()) if existing else 0
             total_words_before += w_old
 
-            if existing:
-                prompt_text = (
-                    f"Existing Draft Caption:\n\"{existing}\"\n\n"
-                    f"Refinement Task:\n"
-                    f"1. Audit the draft caption against this image. Fix any hallucinations or inaccurate rope/hardware terms.\n"
-                    f"2. REFINE and CONSOLIDATE the caption into a concise, dense Krea 2 visual narrative of approximately 150 to 220 words (STRICT MAXIMUM 340 TOKENS).\n"
-                    f"3. Tightly and concisely detail:\n"
-                    f"   - (1) Model Position (posture, spinal curve, limb angles, muscle tension, floor contact points)\n"
-                    f"   - (2) Bondage Type (shibari rope bondage, metallic chain restraint, leather bondage, suspension)\n"
-                    f"   - (3) Bondage Equipment & materials (5-8mm hemp/jute cordage, welded steel chains, chrome handcuffs, O-rings, spreader bars)\n"
-                    f"   - (4) Bondage Position & anatomical rigging (takate-kote box tie, hishime chest harness, wrist/ankle positioning, skin indentation bite marks)\n"
-                    f"   - (5) Studio environment & flooring (glossy reflective black floor, dark void)\n"
-                    f"   - (6) Chiaroscuro lighting & specular highlights skimming contours\n"
-                    f"   - (7) Camera optics, focal length (50mm/85mm), and shallow depth of field.\n"
-                    f"Output raw caption text only. Do not output JSON."
-                )
+            # Determine tier
+            if args.tier_mode == "tags-only":
+                item_tier = "tags"
+            elif args.tier_mode == "short-only":
+                item_tier = "short"
+            elif args.tier_mode == "dense-only":
+                item_tier = "dense"
             else:
-                prompt_text = (
-                    f"Task:\n"
-                    f"Inspect this image and write a concise, dense Krea 2 visual narrative of approximately 150 to 220 words (STRICT MAXIMUM 340 TOKENS).\n"
-                    f"Tightly and concisely detail:\n"
-                    f"- Model Position & anatomical posture (limb angles, spinal curvature, tension, contact points)\n"
-                    f"- Bondage Type & discipline classification\n"
-                    f"- Bondage Equipment & materials (cordage diameter, steel chain gauge, chrome cuffs, O-rings)\n"
-                    f"- Bondage Position & anatomical placement (takate-kote, chest harness, ankle/wrist ties, skin bite indentations)\n"
-                    f"- Studio environment, flooring reflections, chiaroscuro lighting, and camera optics.\n"
-                    f"Output raw caption text only. Do not output JSON."
-                )
+                item_tier = determine_caption_tier(global_idx, distribution=tier_dist)
+            it["assigned_tier"] = item_tier
+
+            # Determine trigger token
+            item_trigger = args.trigger
+            if not item_trigger:
+                if it["existing_caption"]:
+                    m_trig = re.match(r"^(kink,\s*[a-zA-Z0-9_\-\.]+)", it["existing_caption"])
+                    if m_trig:
+                        item_trigger = m_trig.group(1)
+                    elif it["existing_caption"].startswith("restrained_elegance"):
+                        item_trigger = "restrained_elegance"
+                if not item_trigger:
+                    item_trigger = "restrained_elegance"
+            it["item_trigger"] = item_trigger
+
+            prompt_text = build_tier_prompt(
+                tier=item_tier,
+                existing_caption=existing,
+                trigger_word=item_trigger,
+            )
             user_prompts.append(prompt_text)
 
         # Generate outputs via Gemma 4 parallel engine in raw text mode
@@ -351,15 +382,7 @@ def main():
                 continue
 
             # Determine trigger token
-            item_trigger = args.trigger
-            if not item_trigger:
-                # Try to extract trigger token from existing caption (e.g. 'kink, category')
-                if it["existing_caption"]:
-                    m_trig = re.match(r"^(kink,\s*[a-zA-Z0-9_\-\.]+)", it["existing_caption"])
-                    if m_trig:
-                        item_trigger = m_trig.group(1)
-                    elif it["existing_caption"].startswith("restrained_elegance"):
-                        item_trigger = "restrained_elegance"
+            item_trigger = it.get("item_trigger", args.trigger or "restrained_elegance")
 
             caption_text = assemble_caption(
                 res_data,
@@ -399,18 +422,24 @@ def main():
             total_words_after += w_new
             refined_count += 1
 
+            tier_name = it.get("assigned_tier", "dense")
+            tier_stats[tier_name]["count"] += 1
+            tier_stats[tier_name]["words"] += w_new
+            tier_label = f"[{tier_name.upper()}]"
+
             # Append to live monitor log file
             try:
                 live_log_path = txt_path.parent / "live_captions.log"
                 with open(live_log_path, "a", encoding="utf-8") as lf:
-                    lf.write(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {it['image_path'].name} | {w_new}w (~{approx_tokens} tokens)\n")
+                    lf.write(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {it['image_path'].name} {tier_label} | {w_new}w (~{approx_tokens} tokens)\n")
                     lf.write(caption_text + "\n\n" + ("=" * 80) + "\n\n")
             except Exception:
                 pass
 
             if args.show_captions:
                 print("\n" + "─" * 78)
-                print(f"  ✓ [REFINED] {it['image_path'].name}")
+                print(f"  ✓ {tier_label} {it['image_path'].name}")
+                print(f"    Tier    : {tier_name.capitalize()} (Target: {tier_dist[0]}% tags / {tier_dist[1]}% short / {tier_dist[2]}% dense)")
                 print(f"    Metrics : {w_old}w -> {w_new}w (~{approx_tokens} tokens)")
                 print(f"    Saved To: {txt_path}")
                 print("─" * 78)
@@ -418,7 +447,7 @@ def main():
                 print("─" * 78 + "\n")
             else:
                 logger.info(
-                    f"  ✓ [REFINED] {it['image_path'].name}: {w_old}w -> {w_new}w (~{approx_tokens} tokens) | {caption_text[:65]}..."
+                    f"  ✓ {tier_label} {it['image_path'].name}: {w_old}w -> {w_new}w (~{approx_tokens} tokens) | {caption_text[:65]}..."
                 )
 
     logger.info("\n" + "=" * 70)
@@ -427,11 +456,14 @@ def main():
     logger.info(f"Total Items Processed : {total_items}")
     logger.info(f"Successfully Refined  : {refined_count}")
     logger.info(f"Failed / Skipped      : {failed_count}")
-    if refined_count > 0:
-        avg_before = total_words_before / max(1, refined_count)
-        avg_after = total_words_after / max(1, refined_count)
-        logger.info(f"Average Words Before  : {avg_before:.1f} words (~{int(avg_before * 1.35)} tokens)")
-        logger.info(f"Average Words After   : {avg_after:.1f} words (~{int(avg_after * 1.35)} tokens)")
+    logger.info("-" * 70)
+    logger.info("  STRATIFIED TIER BREAKDOWN:")
+    for t_name, s_data in tier_stats.items():
+        c = s_data["count"]
+        pct = (c / max(1, refined_count)) * 100
+        avg_w = s_data["words"] / max(1, c)
+        avg_tok = int(avg_w * 1.35)
+        logger.info(f"  • {t_name.capitalize():<8} : {c:>5} images ({pct:>5.1f}%) | Avg: {avg_w:>5.1f} words (~{avg_tok:>3} tokens)")
     logger.info("=" * 70)
 
 

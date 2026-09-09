@@ -72,7 +72,21 @@ Every production-grade Krea 2 caption must exhaustively document these core doma
 
 ---
 
-## 4. Multi-Tier Caption Strategy for LoRA Training
-1. **`caption_dense` (150–340 tokens / ~150–220 words)**: Primary training target (used in 70% of epochs). Teaches full sensory fidelity, rigging geometry, and scene decomposition with zero token bloat.
-2. **`caption_mid` (40–70 words)**: Condensed anchor focusing on Subject + Model Position + Bondage Type/Hardware + Setting (used in 20% of epochs).
-3. **`caption_short` (15–25 words)**: Minimalist anchor for high-guidance inference.
+## 4. Stratified Multi-Tier Caption Distribution (30% / 40% / 30%)
+
+For large datasets (1,000 to 4,000+ images), applying a single long caption format risks overfitting the model to long prompts. A **Stratified Multi-Tier Distribution** ensures maximum versatility at inference time:
+
+1. **Tier A: Comma-Separated Tags (30% of Dataset)**:
+   - Target tokens: ~25 to 50 tokens.
+   - Syntax: `{trigger}, photograph, [demographics], [model position], [bondage type], [equipment & materials], [rigging location], [environment], [lighting], [optics]`.
+   - Purpose: Trains the model to respond accurately to simple keyword tag prompts.
+
+2. **Tier B: Short Anchor Captions (40% of Dataset)**:
+   - Target tokens: Max 150 tokens (~40–85 words, 1–2 sentences).
+   - Syntax: `{trigger} Photograph of [subject] [position] on [floor]. Bound in [bondage type & equipment] with [rigging]. [Lighting & optics].`
+   - Purpose: Trains the model for typical conversational, mid-length prompts.
+
+3. **Tier C: Dense Visual Narratives (30% of Dataset)**:
+   - Target tokens: Max 340 tokens (~150–220 words).
+   - Syntax: Full 8-domain narrative detailing posture tension, knot patterns, metallic specular shine, skin indentation bite marks, and chiaroscuro staging.
+   - Purpose: Teaches high-fidelity spatial reasoning, fine skin pores, and complex hardware physics.

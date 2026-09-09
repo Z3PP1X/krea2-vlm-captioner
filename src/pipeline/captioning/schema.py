@@ -132,3 +132,86 @@ def build_system_prompt(vocab: Optional[Dict[str, List[str]]] = None, raw_captio
         "### FORMAT:\n"
         "Output ONLY a single valid JSON object strictly adhering to the schema. No conversational filler, markdown fences, or preamble."
     )
+
+
+def determine_caption_tier(index: int, distribution: tuple[int, int, int] = (30, 40, 30)) -> str:
+    """Determines the caption tier for an item given its index based on a distribution (tags, short, dense).
+    
+    Default: 30% tags, 40% short, 30% dense.
+    Uses interleaving pattern for balanced GPU batches:
+    Index % 10:
+    0, 3, 7    -> tags (30%)
+    1, 4, 5, 8 -> short (40%)
+    2, 6, 9    -> dense (30%)
+    """
+    p_tags, p_short, p_dense = distribution
+    total = p_tags + p_short + p_dense
+    mod_val = (index * 7) % total
+    if mod_val < p_tags:
+        return "tags"
+    elif mod_val < (p_tags + p_short):
+        return "short"
+    else:
+        return "dense"
+
+
+def build_tier_prompt(
+    tier: str,
+    existing_caption: Optional[str] = None,
+    trigger_word: Optional[str] = None,
+    context: str = "",
+) -> str:
+    """Builds a prompt tailored specifically for the selected caption tier."""
+    trig_info = f"Begin directly with the trigger token '{trigger_word}'. " if trigger_word else ""
+    ctx_info = f"Context: {context}" if context else ""
+
+    if tier == "tags":
+        if existing_caption:
+            return (
+                f"Existing Draft Caption: \"{existing_caption}\"\n\n"
+                f"Task: Extract, audit, and output CONCISE COMMA-SEPARATED TAGS ONLY for this image. {trig_info}"
+                f"Include essential tags covering: trigger word, medium/format, subject demographics, model position (e.g. seiza, kneeling, arched), "
+                f"bondage type (e.g. shibari, chain restraint), equipment (hemp rope 6mm, chrome cuffs, welded o-ring), "
+                f"rigging location (takate-kote, chest harness, wrist cuffs), studio environment, lighting, and optics.\n"
+                f"STRICT FORMAT: Output pure comma-separated tags only. Do NOT write full sentences, code blocks, or conversational filler. {ctx_info}"
+            )
+        else:
+            return (
+                f"Task: Inspect this image and output CONCISE COMMA-SEPARATED TAGS ONLY. {trig_info}"
+                f"Include essential tags covering: trigger word, medium/format, subject demographics, model position (e.g. seiza, kneeling, arched), "
+                f"bondage type (e.g. shibari, chain restraint), equipment (hemp rope 6mm, chrome cuffs, welded o-ring), "
+                f"rigging location (takate-kote, chest harness, wrist cuffs), studio environment, lighting, and optics.\n"
+                f"STRICT FORMAT: Output pure comma-separated tags only. Do NOT write full sentences, code blocks, or conversational filler. {ctx_info}"
+            )
+
+    elif tier == "short":
+        if existing_caption:
+            return (
+                f"Existing Draft Caption: \"{existing_caption}\"\n\n"
+                f"Task: Audit and consolidate this into a tight, focused short caption of MAXIMUM 150 TOKENS (~40 to 80 words in 1-2 fluent sentences). {trig_info}"
+                f"Clearly state: subject demographics, model position, bondage type & equipment, rigging placement, setting, and lighting.\n"
+                f"STRICT FORMAT: Output raw caption text only. Do NOT write JSON, bullet points, or conversational preamble. {ctx_info}"
+            )
+        else:
+            return (
+                f"Task: Inspect this image and write a tight, focused short caption of MAXIMUM 150 TOKENS (~40 to 80 words in 1-2 fluent sentences). {trig_info}"
+                f"Clearly state: subject demographics, model position, bondage type & equipment, rigging placement, setting, and lighting.\n"
+                f"STRICT FORMAT: Output raw caption text only. Do NOT write JSON, bullet points, or conversational preamble. {ctx_info}"
+            )
+
+    else:  # "dense" (default / 30%)
+        if existing_caption:
+            return (
+                f"Existing Draft Caption: \"{existing_caption}\"\n\n"
+                f"Task: Audit and elevate this into a dense visual narrative of approximately 150 to 220 words (STRICT MAXIMUM 340 TOKENS). {trig_info}"
+                f"Concisely detail all domains: (1) Model Position, (2) Bondage Type, (3) Equipment & Materials (rope gauge, hardware), "
+                f"(4) Rigging Topology & skin bite indentations, (5) Studio flooring/backdrop, (6) Chiaroscuro lighting, (7) Optics & DoF.\n"
+                f"STRICT FORMAT: Output raw caption text only. Do NOT write JSON or conversational preamble. {ctx_info}"
+            )
+        else:
+            return (
+                f"Task: Inspect this image and write a dense visual narrative of approximately 150 to 220 words (STRICT MAXIMUM 340 TOKENS). {trig_info}"
+                f"Concisely detail all domains: (1) Model Position, (2) Bondage Type, (3) Equipment & Materials (rope gauge, hardware), "
+                f"(4) Rigging Topology & skin bite indentations, (5) Studio flooring/backdrop, (6) Chiaroscuro lighting, (7) Optics & DoF.\n"
+                f"STRICT FORMAT: Output raw caption text only. Do NOT write JSON or conversational preamble. {ctx_info}"
+            )

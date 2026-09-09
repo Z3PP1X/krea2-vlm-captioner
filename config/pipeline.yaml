@@ -52,6 +52,13 @@ stage4_caption:
   caption_mode: "style"               # 'style' (omits style enum in text) or 'subject'
   caption_template: "{trigger} {style} {location} {description} {lighting_camera}"
   
+  caption_tiers:
+    enabled: true
+    distribution: [30, 40, 30]        # 30% tags, 40% short (max 150 tok), 30% dense (max 340 tok)
+    max_tokens_tags: 80
+    max_tokens_short: 150
+    max_tokens_dense: 340
+  
   screening:
     enforce: true                     # Screening gate
     check_age: false                  # Age verification disabled (manually verified by user)

@@ -28,13 +28,14 @@ def assemble_caption(
     trigger_str = trigger_word.strip() if trigger_word else ""
     caption_dense = str(data.get("caption_dense", "")).strip()
 
-    # If modern 7-layer caption_dense is available, use it directly!
-    if caption_dense and len(caption_dense.split()) >= 25:
+    # If caption_dense (dense narrative, short caption, or tags) is available, use it directly!
+    if caption_dense:
         if trigger_str:
             # Check if trigger is already prepended
             t_clean = trigger_str.rstrip(", ").lower()
             if not caption_dense.lower().startswith(t_clean):
-                caption_dense = f"{trigger_str} {caption_dense}"
+                separator = ", " if ("," in caption_dense and not caption_dense.startswith("Photograph")) else " "
+                caption_dense = f"{trigger_str}{separator}{caption_dense}"
         return re.sub(r"\s+", " ", caption_dense).strip()
 
     # Fallback to modular composition
