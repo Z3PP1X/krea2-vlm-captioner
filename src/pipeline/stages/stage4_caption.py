@@ -326,9 +326,20 @@ def run_stage4(args: Any, config: Dict[str, Any]) -> int:
                 continue
 
             # 4. Caption Assembly
+            item_trigger = entry.trigger_word
+            if not item_trigger:
+                if trigger_word and "{category}" in trigger_word and entry.category:
+                    item_trigger = trigger_word.replace("{category}", entry.category)
+                elif trigger_word:
+                    item_trigger = trigger_word
+                elif entry.category:
+                    item_trigger = f"kink, {entry.category}"
+                else:
+                    item_trigger = "restrained_elegance"
+
             caption_text = assemble_caption(
                 res_data,
-                trigger_word=trigger_word,
+                trigger_word=item_trigger,
                 caption_mode=caption_mode,
                 template=template,
             )

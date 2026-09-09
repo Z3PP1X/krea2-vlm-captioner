@@ -24,6 +24,8 @@ class ManifestEntry(BaseModel):
     page_url: Optional[str] = Field(default=None, description="Remote gallery/thread page URL")
     context_title: Optional[str] = Field(default=None, description="Set/Scene title")
     context_tags: List[str] = Field(default_factory=list, description="Original tags or genre metadata")
+    category: Optional[str] = Field(default=None, description="Category or channel name")
+    trigger_word: Optional[str] = Field(default=None, description="Specific trigger word for this item")
 
     # File locations
     raw_path: Optional[str] = Field(default=None, description="Relative path to raw downloaded file")

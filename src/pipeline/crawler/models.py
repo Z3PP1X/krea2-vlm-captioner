@@ -12,6 +12,8 @@ class CandidateImage(BaseModel):
     page_url: str
     context_title: str = "Unknown Set"
     context_tags: List[str] = Field(default_factory=list)
+    category: Optional[str] = None
+    trigger_word: Optional[str] = None
     estimated_width: Optional[int] = None
     estimated_height: Optional[int] = None
     http_headers: Dict[str, str] = Field(default_factory=dict)

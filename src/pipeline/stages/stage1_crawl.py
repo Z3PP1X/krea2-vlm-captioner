@@ -272,6 +272,8 @@ def run_stage1(args: Any, config: Dict[str, Any]) -> int:
                 page_url=cand.page_url,
                 context_title=cand.context_title,
                 context_tags=cand.context_tags,
+                category=cand.category,
+                trigger_word=cand.trigger_word,
                 raw_path=rel_raw_path,
                 sha256=sha256_hash,
                 width=actual_w,
