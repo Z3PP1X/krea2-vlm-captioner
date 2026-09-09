@@ -208,13 +208,22 @@ def run_stage4(args: Any, config: Dict[str, Any]) -> int:
 
     # 2. Initialize VLM Engine
     max_model_len = getattr(args, "max_model_len", None) or int(cap_cfg.get("max_model_len", 12288))
-    engine = QwenVLEngine(
-        model_name=model_name,
-        gpu_memory_utilization=float(cap_cfg.get("vllm_gpu_memory_utilization", 0.85)),
-        max_model_len=max_model_len,
-        temperature=float(cap_cfg.get("temperature", 0.2)),
-        max_tokens=int(cap_cfg.get("max_tokens", 250)),
-    )
+    m_lower = model_name.lower()
+    if "gemma-4" in m_lower or "gemma4" in m_lower:
+        from pipeline.captioning.hf_gemma4_engine import Gemma4HfEngine
+        engine = Gemma4HfEngine(
+            model_name=model_name,
+            temperature=float(cap_cfg.get("temperature", 0.2)),
+            max_tokens=int(cap_cfg.get("max_tokens", 350)),
+        )
+    else:
+        engine = QwenVLEngine(
+            model_name=model_name,
+            gpu_memory_utilization=float(cap_cfg.get("vllm_gpu_memory_utilization", 0.85)),
+            max_model_len=max_model_len,
+            temperature=float(cap_cfg.get("temperature", 0.2)),
+            max_tokens=int(cap_cfg.get("max_tokens", 250)),
+        )
 
     try:
         engine._ensure_model_loaded()

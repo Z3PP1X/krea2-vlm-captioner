@@ -14,7 +14,8 @@ if [ -f ".venv/bin/activate" ]; then
     source .venv/bin/activate
 fi
 
-# 2. Set HuggingFace cache and optimize vLLM on RTX PRO 6000
+# 2. Optimize environment & ensure transformers supports Gemma 4 AutoModelForMultimodalLM
+pip install -U "transformers>=4.49.0" accelerate -q 2>/dev/null || true
 export VLLM_USE_FLASHINFER_SAMPLER=0
 export VLLM_USE_V1=0
 export TOKENIZERS_PARALLELISM=false
@@ -22,7 +23,8 @@ export TOKENIZERS_PARALLELISM=false
 echo "========================================================================"
 echo " Starting Kink Collection End-to-End Pipeline (Stages 1-5)"
 echo " GPU Target : RTX PRO 6000 (96GB VRAM)"
-echo " Model      : Qwen 2.5 VL 7B Instruct (Qwen/Qwen2.5-VL-7B-Instruct)"
+echo " Model      : Google Gemma 4 12B Multimodal (google/gemma-4-12B-it)"
+echo " Engine     : Native Hugging Face AutoModelForMultimodalLM (bfloat16)"
 echo " Batch Size : 32"
 echo " Workers    : 16"
 echo " Min Res    : 256px"
