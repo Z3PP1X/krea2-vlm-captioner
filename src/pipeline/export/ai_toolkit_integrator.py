@@ -58,18 +58,30 @@ def link_dataset_folder(ai_toolkit_dir: Path, dataset_name: str, images_dir: Pat
     link_path = target_datasets_dir / dataset_name
     src_path = images_dir.resolve()
 
+    # Clean up any existing symlink
     if link_path.is_symlink():
         try:
-            if link_path.resolve() == src_path:
-                logger.debug(f"Symlink already points to {src_path}: {link_path}")
-                return link_path
             link_path.unlink()
         except OSError:
             pass
-    elif link_path.exists():
-        logger.info(f"Dataset target path already exists as regular directory: {link_path}")
+    elif link_path.is_dir() and any(link_path.iterdir()):
+        logger.info(f"Dataset target path already exists and is populated: {link_path}")
         return link_path
 
+    # 1. On Linux, prefer hardlink tree (cp -al)
+    # AI-Toolkit's Node.js backend uses `dirent.isDirectory()` and `dirent.isFile()` with `{ withFileTypes: true }`.
+    # In Node.js, `dirent.isDirectory()` returns FALSE for directory symlinks!
+    # Hardlink trees create real directories with 0 additional disk space that Node.js reads natively.
+    if os.name != "nt":
+        try:
+            import subprocess
+            subprocess.run(["cp", "-al", str(src_path), str(link_path)], check=True)
+            logger.info(f"Successfully created hardlinked dataset (Node.js compatible): {link_path} -> {src_path}")
+            return link_path
+        except Exception as cp_err:
+            logger.debug(f"cp -al failed ({cp_err}), falling back to symlink...")
+
+    # 2. Symlink / Windows Junction fallback
     try:
         os.symlink(str(src_path), str(link_path), target_is_directory=True)
         logger.info(f"Successfully symlinked dataset: {link_path} -> {src_path}")
