@@ -132,7 +132,7 @@ def run_stage4(args: Any, config: Dict[str, Any]) -> int:
         user_prompts = []
 
         for entry in batch_entries:
-            p = Path(entry.processed_path) if entry.processed_path else Path(entry.raw_path or "")
+            p = entry.get_processed_file() or entry.get_raw_file() or Path(entry.processed_path or entry.raw_path or "")
             image_paths.append(p)
             context = f"Context: {entry.context_title}. Tags: {', '.join(entry.context_tags)}" if entry.context_tags else ""
             user_prompts.append(

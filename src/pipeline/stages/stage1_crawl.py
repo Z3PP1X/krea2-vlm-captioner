@@ -226,7 +226,7 @@ def run_stage1(args: Any, config: Dict[str, Any]) -> int:
             with open(dest_path, "wb") as f:
                 f.write(img_bytes)
 
-            rel_raw_path = os.path.relpath(dest_path, raw_dir.parent).replace("\\", "/")
+            rel_raw_path = str(dest_path).replace("\\", "/")
 
             # Register in Manifest (thread-safe)
             entry = ManifestEntry(

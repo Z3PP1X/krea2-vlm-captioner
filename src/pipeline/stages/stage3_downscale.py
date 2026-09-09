@@ -83,9 +83,9 @@ def run_stage3(args: Any, config: Dict[str, Any]) -> int:
     success_count = 0
 
     for idx, entry in enumerate(eligible, 1):
-        raw_path = Path(entry.raw_path) if entry.raw_path else None
+        raw_path = entry.get_raw_file()
         if not raw_path or not raw_path.exists():
-            logger.warning(f"Raw file missing for {entry.image_id}: {raw_path}")
+            logger.warning(f"Raw file missing for {entry.image_id}: {entry.raw_path}")
             entry.update_stage("stage3_downscale", "failed", reasons=["missing_raw_file"])
             continue
 

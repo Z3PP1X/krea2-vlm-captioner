@@ -48,11 +48,11 @@ def run_stage2(args: Any, config: Dict[str, Any]) -> int:
     logger.info(f"EXIF Stripping        : {strip_exif}")
     logger.info("=" * 60)
 
-    # Process all entries ready for QC
+    # Process all entries ready for QC (including recovering any falsely marked missing_raw_file)
     eligible_entries = [
         e for e in manifest
         if e.stages_status.get("stage1_crawl") == "downloaded"
-        and e.stages_status.get("stage2_qc") in ["pending", None]
+        and (e.stages_status.get("stage2_qc") in ["pending", None] or "missing_raw_file" in e.rejection_reasons)
     ]
 
     logger.info(f"Found {len(eligible_entries)} items eligible for QC.")
@@ -64,10 +64,14 @@ def run_stage2(args: Any, config: Dict[str, Any]) -> int:
     valid_qc_items: List[Dict[str, Any]] = []
 
     for idx, entry in enumerate(eligible_entries, 1):
-        raw_path = Path(entry.raw_path) if entry.raw_path else None
+        raw_path = entry.get_raw_file()
         if not raw_path or not raw_path.exists():
             entry.update_stage("stage2_qc", "failed", reasons=["missing_raw_file"])
             continue
+
+        if "missing_raw_file" in entry.rejection_reasons:
+            entry.rejection_reasons.remove("missing_raw_file")
+        entry.raw_path = str(raw_path).replace("\\", "/")
 
         try:
             with Image.open(raw_path) as raw_img:

@@ -79,6 +79,34 @@ class ManifestEntry(BaseModel):
             or len(self.rejection_reasons) > 0
         )
 
+    def get_raw_file(self) -> Optional[Path]:
+        """Resolves existing raw file path robustly."""
+        return resolve_manifest_path(self.raw_path)
+
+    def get_processed_file(self) -> Optional[Path]:
+        """Resolves existing processed file path robustly."""
+        return resolve_manifest_path(self.processed_path)
+
+
+def resolve_manifest_path(path_str: Optional[str | Path]) -> Optional[Path]:
+    """Resolves a manifest file path robustly against cwd and data directory."""
+    if not path_str:
+        return None
+    p = Path(path_str)
+    if p.exists():
+        return p
+    # Try with 'data/' prefix
+    data_p = Path("data") / p
+    if data_p.exists():
+        return data_p
+    # Try if path starts with 'data/' but current dir already is 'data/'
+    parts = p.parts
+    if parts and parts[0] == "data":
+        sub_p = Path(*parts[1:])
+        if sub_p.exists():
+            return sub_p
+    return None
+
 
 class Manifest:
     """Manages reading, querying, and atomically saving manifest entries."""
