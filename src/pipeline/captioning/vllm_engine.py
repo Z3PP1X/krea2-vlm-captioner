@@ -50,8 +50,8 @@ class QwenVLEngine:
             )
         except ImportError as exc:
             raise RuntimeError(
-                "vLLM is not installed in the current environment. "
-                "Install with 'pip install vllm torch' on an Nvidia GPU system (e.g. L40S or RTX 5090)."
+                f"vLLM could not be imported: {exc}. "
+                "If numpy version conflict, downgrade with 'pip install \"numpy<2\"'."
             ) from exc
 
     def generate_batch(
