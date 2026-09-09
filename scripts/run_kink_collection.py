@@ -1,13 +1,14 @@
 """Kink Collection End-to-End Orchestrator (Stages 1-5)
 
-Automated pipeline execution for 9 curated dbNaked channels:
-1. Crawls up to 400 images per channel (skipping first & last image per scene, max 7 per scene).
-2. Sets per-item trigger: 'kink, <category>' (e.g. 'kink, sexandsubmission').
-3. Enforces minimum resolution >= 256px.
-4. Executes Stage 2 (QC & deduplication with 16 parallel CPU workers).
-5. Executes Stage 3 (Downscale to max 2048px).
-6. Executes Stage 4 (Offline batch captioning with Gemma 4 12B on RTX PRO 6000 96GB VRAM, screening relaxed).
-7. Executes Stage 5 (Exports into single unified dataset 'kink_collection' for AI-Toolkit).
+Ultra-fast automated pipeline execution for 9 curated dbNaked channels:
+1. Fast direct-card candidate extraction (never hangs on slow scene HTML).
+2. Crawls up to 400 images per channel (skipping first & last image per scene, max 7 per scene).
+3. Sets per-item trigger: 'kink, <category>' (e.g. 'kink, sexandsubmission').
+4. Enforces minimum resolution >= 256px.
+5. Executes Stage 2 (QC & deduplication with 16 parallel CPU workers).
+6. Executes Stage 3 (Downscale to max 2048px).
+7. Executes Stage 4 (Offline batch captioning with Gemma 4 12B on RTX PRO 6000 96GB VRAM, screening relaxed).
+8. Executes Stage 5 (Exports into single unified dataset 'kink_collection' for AI-Toolkit).
 """
 
 from __future__ import annotations
@@ -22,7 +23,7 @@ import logging
 import argparse
 from pathlib import Path
 from typing import List, Dict, Any, Optional
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urljoin
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
@@ -40,7 +41,6 @@ from pipeline.crawler.models import CandidateImage
 from pipeline.crawler.dbnaked import (
     DBNAKED_HEADERS,
     build_dbnaked_page_url,
-    extract_scene_links_from_channel,
 )
 from pipeline.logging_utils import setup_logging
 from pipeline.stages.stage2_qc import run_stage2
@@ -100,110 +100,66 @@ TARGET_CHANNELS = [
 ]
 
 
-def is_scene_url(url: str) -> bool:
-    """Checks if a URL is an individual scene gallery rather than a channel index."""
-    path = urlparse(url).path
-    last_seg = path.strip("/").split("/")[-1]
-    return bool(re.match(r"^\d+_", last_seg))
-
-
-def extract_scene_images(
-    scene_url: str,
-    session: requests.Session,
-    timeout: float = 25.0,
-) -> List[CandidateImage]:
-    """Fetches a dbNaked scene and extracts high-res candidate images sorted by image number."""
-    try:
-        resp = session.get(scene_url, headers=DBNAKED_HEADERS, timeout=timeout)
-        if resp.status_code != 200:
-            logger.warning(f"Failed to fetch scene {scene_url}: HTTP {resp.status_code}")
-            return []
-    except Exception as e:
-        logger.warning(f"Error fetching scene {scene_url}: {e}")
-        return []
-
-    soup = BeautifulSoup(resp.text, "html.parser")
-
-    # Title extraction
-    title = "Unknown Scene"
-    h1 = soup.find("h1")
-    if h1 and h1.get_text(strip=True):
-        title = h1.get_text(strip=True)
-
-    # Categories/Tags
-    tags = []
-    for tag_elem in soup.find_all("a", href=re.compile(r"/pictures/(categories|tags|models)/")):
-        t = tag_elem.get_text(strip=True)
-        if t and t not in tags:
-            tags.append(t)
-
-    images_by_num: Dict[int, str] = {}
-
-    # 1. Extract from high-res links
-    for a in soup.find_all("a", href=True):
-        href = a["href"].strip()
-        m = re.search(r"/scene/(\d+)/.*?/(\d+)\.jpg", href)
-        if m:
-            s_id, num = m.group(1), int(m.group(2))
-            images_by_num[num] = f"https://i.dbnaked.com/scene/{s_id}/t1600x1600/{num}.jpg"
-
-    # 2. Extract from img tags
-    for img in soup.find_all("img"):
-        src = (img.get("data-src") or img.get("src") or "").strip()
-        m = re.search(r"/scene/(\d+)/.*?/(\d+)\.jpg", src)
-        if m:
-            s_id, num = m.group(1), int(m.group(2))
-            if num not in images_by_num:
-                images_by_num[num] = f"https://i.dbnaked.com/scene/{s_id}/t1600x1600/{num}.jpg"
-
-    sorted_nums = sorted(images_by_num.keys())
-    return [
-        CandidateImage(
-            source="dbnaked",
-            source_url=images_by_num[n],
-            page_url=scene_url,
-            context_title=title,
-            context_tags=tags,
-            http_headers=DBNAKED_HEADERS,
-        )
-        for n in sorted_nums
-    ]
-
-
-def sample_scene_candidates(
-    candidates: List[CandidateImage],
+def extract_candidates_from_channel_page(
+    html: str,
+    channel_url: str,
+    category: str,
+    trigger: str,
     max_per_scene: int = 7,
-    category: str = "",
-    trigger: str = "",
 ) -> List[CandidateImage]:
-    """Applies sampling rules to a scene's images:
+    """Extracts candidate images directly from scene cards on the channel page in milliseconds.
     
-    1. Skip first and last image in the gallery.
-    2. Select at most max_per_scene images evenly distributed across the scene progression.
-    3. Tag each candidate with category and custom trigger.
+    Avoids slow scene HTML round-trips by reading scene metadata, image counts, and constructing
+    high-res CDN image URLs directly.
     """
-    total = len(candidates)
-    if total <= 2:
-        return []
+    soup = BeautifulSoup(html, "html.parser")
+    cards = soup.find_all("div", class_=lambda c: c and "tmb" in c and "card" in c)
+    candidates: List[CandidateImage] = []
 
-    # Exclude 1st and last image
-    pool = candidates[1:-1]
-    pool_len = len(pool)
+    for card in cards:
+        scene_id = card.get("data-app-modal-data")
+        if not scene_id or not scene_id.isdigit():
+            continue
 
-    if pool_len <= max_per_scene:
-        selected = pool
-    else:
-        # Pick max_per_scene evenly spaced across the sequence
-        indices = [int(round(i * (pool_len - 1) / float(max_per_scene - 1))) for i in range(max_per_scene)]
-        indices = sorted(list(dict.fromkeys(indices)))
-        selected = [pool[i] for i in indices]
+        a_link = card.find("a", href=True)
+        title = a_link.get("title", f"Scene {scene_id}").strip() if a_link else f"Scene {scene_id}"
+        scene_url = urljoin(channel_url, a_link["href"]) if a_link else ""
 
-    # Tag each candidate
-    for cand in selected:
-        cand.category = category
-        cand.trigger_word = trigger
+        img_div = card.find("div", class_="images")
+        total_imgs = 0
+        if img_div:
+            num_txt = img_div.get_text(strip=True)
+            if num_txt.isdigit():
+                total_imgs = int(num_txt)
 
-    return selected
+        # Rule 1: Skip first (1) and last (total_imgs) image
+        if total_imgs <= 2:
+            continue
+
+        pool = list(range(2, total_imgs))
+        # Rule 2: Max 7 images per scene, evenly spaced across progression
+        if len(pool) <= max_per_scene:
+            chosen_nums = pool
+        else:
+            indices = [int(round(i * (len(pool) - 1) / float(max_per_scene - 1))) for i in range(max_per_scene)]
+            indices = sorted(list(dict.fromkeys(indices)))
+            chosen_nums = [pool[i] for i in indices]
+
+        for num in chosen_nums:
+            img_url = f"https://i.dbnaked.com/scene/{scene_id}/t1600x1600/{num}.jpg"
+            candidates.append(
+                CandidateImage(
+                    source="dbnaked",
+                    source_url=img_url,
+                    page_url=scene_url,
+                    context_title=title,
+                    category=category,
+                    trigger_word=trigger,
+                    http_headers=DBNAKED_HEADERS,
+                )
+            )
+
+    return candidates
 
 
 def crawl_and_download_channel(
@@ -215,18 +171,18 @@ def crawl_and_download_channel(
     max_per_scene: int = 7,
     min_res: int = 256,
     workers: int = 16,
-    timeout: float = 25.0,
+    timeout: float = 15.0,
 ) -> int:
     """Crawls scenes for a channel until max_channel_images are acquired."""
     category = channel_info["category"]
     channel_url = channel_info["url"]
     trigger = channel_info["trigger"]
 
-    logger.info(f"\n{'='*60}")
+    logger.info(f"\n{'='*65}")
     logger.info(f" CRAWLING CHANNEL: {category.upper()} (Target: {max_channel_images} images)")
     logger.info(f" Trigger Token   : '{trigger}'")
     logger.info(f" Channel URL     : {channel_url}")
-    logger.info(f"{'='*60}")
+    logger.info(f"{'='*65}")
 
     # Check how many images we already have for this category
     existing_count = sum(
@@ -246,7 +202,7 @@ def crawl_and_download_channel(
 
     while len(selected_candidates) < needed and page <= max_channel_pages:
         p_url = build_dbnaked_page_url(channel_url, page)
-        logger.info(f"[{category}] Inspecting page {page}: {p_url}")
+        logger.info(f"[{category}] Inspecting channel page {page}: {p_url}")
         try:
             r = session.get(p_url, headers=DBNAKED_HEADERS, timeout=timeout)
             if r.status_code != 200:
@@ -256,42 +212,32 @@ def crawl_and_download_channel(
             logger.warning(f"Error fetching channel page {page}: {e}")
             break
 
-        all_scenes = extract_scene_links_from_channel(r.text, p_url)
-        scenes = [s for s in all_scenes if is_scene_url(s)]
-        if not scenes:
-            logger.info(f"[{category}] No more scenes found on page {page}.")
+        page_cands = extract_candidates_from_channel_page(
+            html=r.text,
+            channel_url=p_url,
+            category=category,
+            trigger=trigger,
+            max_per_scene=max_per_scene,
+        )
+
+        if not page_cands:
+            logger.info(f"[{category}] No more candidates found on page {page}.")
             break
 
-        logger.info(f"[{category}] Page {page} has {len(scenes)} scenes. Extracting images...")
-        for s_url in scenes:
+        added_this_page = 0
+        for c in page_cands:
             if len(selected_candidates) >= needed:
                 break
-
-            time.sleep(0.15)  # brief polite pause
-            scene_cands = extract_scene_images(s_url, session, timeout=timeout)
-            # Filter out any already known URLs
-            scene_cands = [c for c in scene_cands if c.source_url not in seen_urls]
-            if not scene_cands:
-                continue
-
-            sampled = sample_scene_candidates(
-                scene_cands,
-                max_per_scene=max_per_scene,
-                category=category,
-                trigger=trigger,
-            )
-            for c in sampled:
-                if len(selected_candidates) >= needed:
-                    break
+            if c.source_url not in seen_urls:
                 seen_urls.add(c.source_url)
                 selected_candidates.append(c)
+                added_this_page += 1
 
-        logger.info(f"[{category}] Candidate images collected so far: {len(selected_candidates)}/{needed}")
+        logger.info(f"[{category}] Page {page}: added {added_this_page} images. Progress: {len(selected_candidates)}/{needed}")
         page += 1
 
-    logger.info(f"[{category}] Collected {len(selected_candidates)} candidates to download with {workers} workers...")
+    logger.info(f"[{category}] Extracted {len(selected_candidates)} total candidates. Starting fast parallel download ({workers} workers)...")
 
-    # Download candidates concurrently
     downloaded_now = 0
 
     def _download_task(cand: CandidateImage) -> Optional[ManifestEntry]:
@@ -305,7 +251,6 @@ def crawl_and_download_channel(
             with Image.open(io.BytesIO(img_bytes)) as pil_img:
                 w, h = pil_img.size
                 if min(w, h) < min_res:
-                    logger.debug(f"Skipping image {cand.source_url} ({w}x{h} < {min_res}px)")
                     return None
 
             sha = hashlib.sha256(img_bytes).hexdigest()
@@ -352,10 +297,12 @@ def crawl_and_download_channel(
             if entry:
                 manifest.add_or_update(entry)
                 downloaded_now += 1
+                if downloaded_now % 50 == 0 or downloaded_now == len(selected_candidates):
+                    logger.info(f"[{category}] Downloaded {downloaded_now}/{len(selected_candidates)} images ({downloaded_now / len(selected_candidates) * 100:.1f}%)...")
 
     manifest.save()
     total_channel_now = existing_count + downloaded_now
-    logger.info(f"[{category}] Completed: {downloaded_now} downloaded now, total {total_channel_now} for this channel.")
+    logger.info(f"[{category}] Finished: {downloaded_now} newly downloaded, total {total_channel_now} for this channel.")
     return total_channel_now
 
 
