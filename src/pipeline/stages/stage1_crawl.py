@@ -12,6 +12,7 @@ from typing import Dict, Any, Optional, List
 from urllib.parse import urlparse, unquote
 import requests
 from PIL import Image
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from pipeline.manifest import Manifest, ManifestEntry
 from pipeline.crawler.models import CandidateImage
@@ -55,7 +56,9 @@ def run_stage1(args: Any, config: Dict[str, Any]) -> int:
     user_agent = crawl_cfg.get("user_agent", "Krea2LoRAPipelineBot/1.0")
     respect_robots = crawl_cfg.get("respect_robots_txt", True)
     filter_tdm = crawl_cfg.get("filter_tdm_opt_out", True)
-    rate_limit_delay = float(crawl_cfg.get("default_rate_limit_delay", 1.0))
+    workers = getattr(args, "max_workers", None) or int(crawl_cfg.get("max_workers", 8))
+    user_delay = getattr(args, "delay", None)
+    rate_limit_delay = float(user_delay) if user_delay is not None else float(crawl_cfg.get("default_rate_limit_delay", 1.0))
     timeout = float(crawl_cfg.get("request_timeout", 25))
 
     target_url = getattr(args, "url", None) or "https://xxx-files.org/threads/hard-tied-photocollection.20611/page-27"
@@ -66,6 +69,7 @@ def run_stage1(args: Any, config: Dict[str, Any]) -> int:
     logger.info("=" * 60)
     logger.info(f"Target URL         : {target_url}")
     logger.info(f"Pages              : {pages_arg}")
+    logger.info(f"Workers            : {workers}")
     logger.info(f"Min Resolution MP  : {min_mp} MP")
     logger.info(f"Robots.txt Check   : {respect_robots}")
     logger.info(f"TDM Opt-out Filter : {filter_tdm} (§ 44b UrhG)")
@@ -79,6 +83,13 @@ def run_stage1(args: Any, config: Dict[str, Any]) -> int:
 
     session = requests.Session()
     session.headers.update({"User-Agent": user_agent})
+    adapter = requests.adapters.HTTPAdapter(
+        pool_connections=max(10, workers * 2),
+        pool_maxsize=max(20, workers * 4),
+        max_retries=2,
+    )
+    session.mount("http://", adapter)
+    session.mount("https://", adapter)
 
     # Determine site type and fetch candidate images
     candidates: List[CandidateImage] = []
@@ -136,27 +147,27 @@ def run_stage1(args: Any, config: Dict[str, Any]) -> int:
 
     logger.info(f"Found {len(candidates)} total candidate images.")
 
-    # 2. Process Candidates with Pre-Filter & Download
+    # 2. Process Candidates with Pre-Filter & Download (Concurrent Workers)
     downloaded_count = 0
     skipped_existing = 0
     skipped_low_res = 0
     skipped_tdm = 0
+    processed_count = 0
 
-    for idx, cand in enumerate(candidates, 1):
+    def download_candidate(cand_idx: int, cand: CandidateImage) -> tuple[str, Any]:
+        """Downloads, checks resolution, and registers a single candidate image."""
         # A. Idempotency Check via Manifest
         existing = manifest.get_by_url(cand.source_url)
         if existing and existing.stages_status.get("stage1_crawl") == "downloaded":
             if existing.raw_path and (Path(existing.raw_path).exists() or (raw_dir.parent / existing.raw_path).exists()):
-                skipped_existing += 1
-                continue
+                return ("skipped_existing", cand.source_url)
 
         # B. Pre-download Resolution Check
         width = cand.estimated_width
         height = cand.estimated_height
 
-        # If not known from HTML attributes, fetch image header
         if width is None or height is None:
-            limiter.wait(cand.source_url, custom_delay=0.2)
+            limiter.wait(cand.source_url, custom_delay=min(0.2, rate_limit_delay))
             header_dims = fetch_remote_resolution(
                 cand.source_url,
                 session=session,
@@ -166,13 +177,11 @@ def run_stage1(args: Any, config: Dict[str, Any]) -> int:
             if header_dims:
                 width, height = header_dims
 
-        # Check Megapixel threshold
         if width and height:
             ok, mp = is_resolution_acceptable(width, height, min_megapixels=min_mp)
             if not ok:
                 logger.debug(f"[PRE-FILTER SKIP] {width}x{height} ({mp:.2f} MP < {min_mp} MP): {cand.source_url}")
-                skipped_low_res += 1
-                continue
+                return ("skipped_low_res", cand.source_url)
 
         # C. Download Image Payload
         limiter.wait(cand.source_url)
@@ -180,14 +189,13 @@ def run_stage1(args: Any, config: Dict[str, Any]) -> int:
             img_resp = session.get(cand.source_url, headers=cand.http_headers, timeout=timeout)
             if img_resp.status_code != 200:
                 logger.warning(f"Download failed ({img_resp.status_code}): {cand.source_url}")
-                continue
+                return ("failed", cand.source_url)
 
             # Check TDM headers on image response
             is_reserved, reason = compliance.check_tdm_reservation(img_resp.headers)
             if is_reserved:
                 logger.info(f"[TDM EXCLUDE] {reason}: {cand.source_url}")
-                skipped_tdm += 1
-                continue
+                return ("skipped_tdm", cand.source_url)
 
             img_bytes = img_resp.content
             sha256_hash = hashlib.sha256(img_bytes).hexdigest()
@@ -198,14 +206,13 @@ def run_stage1(args: Any, config: Dict[str, Any]) -> int:
                     actual_w, actual_h = pil_img.size
             except Exception as e:
                 logger.warning(f"Corrupt image data from {cand.source_url}: {e}")
-                continue
+                return ("corrupt", cand.source_url)
 
             # Secondary post-download MP verification
             actual_mp = (actual_w * actual_h) / 1_000_000.0
             if actual_mp < min_mp:
                 logger.debug(f"[POST-FETCH SKIP] Actual {actual_w}x{actual_h} ({actual_mp:.2f} MP < {min_mp} MP)")
-                skipped_low_res += 1
-                continue
+                return ("skipped_low_res", cand.source_url)
 
             # Save File
             set_folder = sanitize_name(cand.context_title)
@@ -221,7 +228,7 @@ def run_stage1(args: Any, config: Dict[str, Any]) -> int:
 
             rel_raw_path = os.path.relpath(dest_path, raw_dir.parent).replace("\\", "/")
 
-            # Register in Manifest
+            # Register in Manifest (thread-safe)
             entry = ManifestEntry(
                 image_id=sha256_hash,
                 source=cand.source,
@@ -244,15 +251,48 @@ def run_stage1(args: Any, config: Dict[str, Any]) -> int:
                 },
             )
             manifest.add_or_update(entry)
-            downloaded_count += 1
-            logger.info(f"[{idx}/{len(candidates)}] Downloaded: {dest_filename} ({actual_w}x{actual_h}, {actual_mp:.2f} MP)")
-
-            # Save periodically every 10 images
-            if downloaded_count % 10 == 0:
-                manifest.save()
+            return ("downloaded", dest_filename, actual_w, actual_h, actual_mp)
 
         except Exception as exc:
             logger.error(f"Error downloading {cand.source_url}: {exc}")
+            return ("error", cand.source_url)
+
+    def _handle_result(res: tuple[str, Any]) -> None:
+        nonlocal downloaded_count, skipped_existing, skipped_low_res, skipped_tdm, processed_count
+        processed_count += 1
+        status = res[0]
+        if status == "downloaded":
+            downloaded_count += 1
+            _, dest_filename, actual_w, actual_h, actual_mp = res
+            logger.info(f"[{processed_count}/{len(candidates)}] Downloaded: {dest_filename} ({actual_w}x{actual_h}, {actual_mp:.2f} MP)")
+            if downloaded_count % 10 == 0:
+                manifest.save()
+        elif status == "skipped_existing":
+            skipped_existing += 1
+        elif status == "skipped_low_res":
+            skipped_low_res += 1
+        elif status == "skipped_tdm":
+            skipped_tdm += 1
+
+    if workers <= 1:
+        logger.info("Executing downloads sequentially (1 worker)...")
+        for idx, cand in enumerate(candidates, 1):
+            res = download_candidate(idx, cand)
+            _handle_result(res)
+    else:
+        logger.info(f"Executing downloads concurrently with {workers} workers...")
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            future_to_cand = {
+                executor.submit(download_candidate, idx, cand): (idx, cand)
+                for idx, cand in enumerate(candidates, 1)
+            }
+            for future in as_completed(future_to_cand):
+                idx, cand = future_to_cand[future]
+                try:
+                    res = future.result()
+                    _handle_result(res)
+                except Exception as exc:
+                    logger.error(f"Worker exception on image {cand.source_url}: {exc}")
 
     # Final manifest save
     manifest.save()

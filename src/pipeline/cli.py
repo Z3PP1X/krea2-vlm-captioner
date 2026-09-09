@@ -120,7 +120,8 @@ def build_parser() -> argparse.ArgumentParser:
     crawl_parser = subparsers.add_parser("crawl", help="Stufe 1: Crawl images with pre-download resolution filter")
     crawl_parser.add_argument("--url", type=str, help="Target URL (XenForo thread or dbNaked channel)")
     crawl_parser.add_argument("--pages", type=str, help="Pages to crawl (e.g. '1-3', '27', 'all')")
-    crawl_parser.add_argument("--max-workers", type=int, help="Concurrent download workers")
+    crawl_parser.add_argument("-w", "--max-workers", type=int, default=None, help="Concurrent download workers (e.g. 4, 8, 16)")
+    crawl_parser.add_argument("--delay", type=float, default=None, help="Rate limit delay in seconds per domain")
 
     # Stage 2: QC
     qc_parser = subparsers.add_parser("qc", help="Stufe 2: Quality control, sRGB, EXIF strip, and pHash deduplication")

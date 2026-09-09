@@ -25,7 +25,8 @@ class DomainRateLimiter:
             now = time.time()
             last_time = self._last_access.get(domain, 0.0)
             elapsed = now - last_time
-            wait_time = delay - elapsed
-            if wait_time > 0:
-                time.sleep(wait_time)
-            self._last_access[domain] = time.time()
+            wait_time = max(0.0, delay - elapsed)
+            self._last_access[domain] = max(now, last_time) + delay
+
+        if wait_time > 0:
+            time.sleep(wait_time)
